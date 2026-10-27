@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:palio_dashboard/core/obd2/marelli_protocol.dart';
+import 'package:palio_dashboard/core/obd2/pid_definitions.dart';
 
 void main() {
   group('parseMarelliResponse', () {
@@ -41,6 +42,16 @@ void main() {
       expect(result, isNotNull);
       expect(result!.dataBytes, [0x50]);
       expect(MarelliFormulas.speed(result.dataBytes), 80.0);
+    });
+
+    test('parseia resposta de Combustivel (PID 2F)', () {
+      // 83 F1 10 41 2F 80 (0x80 = 128 -> ~50.2%)
+      // Checksum: (0x83 + 0xF1 + 0x10 + 0x41 + 0x2F + 0x80) & 0xFF = 0x74
+      final result = parseMarelliResponse('83 F1 10 41 2F 80 74\r\n>');
+
+      expect(result, isNotNull);
+      expect(result!.dataBytes, [0x80]);
+      expect(MarelliFormulas.fuelLevel(result.dataBytes), closeTo(50.2, 0.1));
     });
 
     test('parseia resposta de tensao direta do ATRV', () {
@@ -117,6 +128,26 @@ void main() {
 
     test('speed retorna valor exato em km/h', () {
       expect(MarelliFormulas.speed([110]), 110.0);
+    });
+
+    test('fuelLevel converte byte para percentual 0 a 100', () {
+      expect(MarelliFormulas.fuelLevel([0]), 0.0);
+      expect(MarelliFormulas.fuelLevel([255]), 100.0);
+      expect(MarelliFormulas.fuelLevel([128]), closeTo(50.19, 0.05));
+    });
+  });
+
+  group('MarelliPid loop & handshake configuration', () {
+    test('ecuHandshakePids não contém batteryVoltage para evitar falso positivo', () {
+      expect(MarelliPid.ecuHandshakePids.contains(MarelliPid.batteryVoltage), isFalse);
+      expect(MarelliPid.ecuHandshakePids.contains(MarelliPid.rpm), isTrue);
+    });
+
+    test('dashboardLoop contém monitoramento completo de sensores e combustível', () {
+      expect(MarelliPid.dashboardLoop.contains(MarelliPid.rpm), isTrue);
+      expect(MarelliPid.dashboardLoop.contains(MarelliPid.fuelLevel), isTrue);
+      expect(MarelliPid.dashboardLoop.contains(MarelliPid.map), isTrue);
+      expect(MarelliPid.dashboardLoop.contains(MarelliPid.tps), isTrue);
     });
   });
 }

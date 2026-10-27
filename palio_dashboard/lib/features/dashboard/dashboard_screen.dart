@@ -21,7 +21,9 @@ import 'widgets/temp_gauge.dart';
 
 Future<void> _connectEcu(BuildContext context, WidgetRef ref) async {
   final service = ref.read(currentObd2ServiceProvider);
-  if (service == null || service.isLoopRunning) return;
+  if (service == null) return;
+  if (service.isLoopRunning && service.lastEcuResponding) return;
+  service.stopLoop();
 
   ref.read(connectingEcuProvider.notifier).state = true;
   try {
@@ -83,6 +85,8 @@ class DashboardScreen extends ConsumerWidget {
         data.coolantTempC >= overheatTemp && data.coolantTempC > 0;
     final isLowBattery =
         data.batteryV > 0 && data.batteryV < lowBatteryAlert;
+    final isLowFuel =
+        data.fuelLevelPercent > 0 && data.fuelLevelPercent <= 15;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -91,7 +95,7 @@ class DashboardScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(8.0),
           child: Column(
             children: [
-              if (isShiftLight || isOverheating || isLowBattery)
+              if (isShiftLight || isOverheating || isLowBattery || isLowFuel)
                 Container(
                   margin: const EdgeInsets.only(bottom: 6),
                   padding:
@@ -101,7 +105,9 @@ class DashboardScreen extends ConsumerWidget {
                         ? AppTheme.danger
                         : (isShiftLight
                             ? clusterTheme.accent
-                            : AppTheme.warning),
+                            : isLowBattery
+                                ? AppTheme.warning
+                                : const Color(0xFFE65100)),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(
@@ -112,7 +118,9 @@ class DashboardScreen extends ConsumerWidget {
                             ? Icons.local_fire_department
                             : (isShiftLight
                                 ? Icons.flash_on
-                                : Icons.battery_alert),
+                                : isLowBattery
+                                    ? Icons.battery_alert
+                                    : Icons.local_gas_station),
                         color: Colors.white,
                         size: 16,
                       ),
@@ -122,7 +130,9 @@ class DashboardScreen extends ConsumerWidget {
                             ? 'ALERTA: SUPERAQUECIMENTO (${tempUnit.convert(data.coolantTempC).toStringAsFixed(0)}${tempUnit.label})'
                             : (isShiftLight
                                 ? '⚡ TROCA DE MARCHA (SHIFT LIGHT) ⚡'
-                                : 'ALERTA: TENSÃO DE BATERIA BAIXA (${data.batteryV.toStringAsFixed(1)}V)'),
+                                : isLowBattery
+                                    ? 'ALERTA: TENSÃO DE BATERIA BAIXA (${data.batteryV.toStringAsFixed(1)}V)'
+                                    : 'ALERTA: NÍVEL DE COMBUSTÍVEL NA RESERVA (${data.fuelLevelPercent.toStringAsFixed(0)}%)'),
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -313,6 +323,45 @@ class DashboardScreen extends ConsumerWidget {
                                         style: AppTheme.digitalDisplay(
                                           fontSize: 18,
                                           color: AppTheme.gaugeDanger,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  Column(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: [
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.local_gas_station,
+                                            size: 11,
+                                            color: data.fuelLevelPercent > 0 &&
+                                                    data.fuelLevelPercent <= 15
+                                                ? AppTheme.warning
+                                                : clusterTheme.accent,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          const Text(
+                                            'COMBUSTÍVEL',
+                                            style: TextStyle(
+                                              color: Colors.white54,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Text(
+                                        data.fuelLevelPercent > 0
+                                            ? '${data.fuelLevelPercent.toStringAsFixed(0)}% (~${(data.fuelLevelPercent * 48.0 / 100.0).toStringAsFixed(0)}L)'
+                                            : '--',
+                                        style: AppTheme.digitalDisplay(
+                                          fontSize: 18,
+                                          color: data.fuelLevelPercent > 0 &&
+                                                  data.fuelLevelPercent <= 15
+                                              ? AppTheme.warning
+                                              : Colors.white,
                                         ),
                                       ),
                                     ],

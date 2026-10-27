@@ -87,14 +87,25 @@ class Obd2Service {
   /// Tenta ler os PIDs Marelli repetidamente até algum responder com
   /// sucesso (ECU respondendo) ou até [timeout] esgotar. Assume que
   /// [setupAdapter] já configurou o ELM327 para KWP2000 ou ISO9141-2.
+  /// Tenta ler os PIDs Marelli repetidamente até algum responder com
+  /// sucesso (ECU respondendo) ou até [timeout] esgotar. Assume que
+  /// [setupAdapter] já configurou o ELM327 para KWP2000 ou ISO9141-2.
+  /// Por padrão valida usando apenas PIDs de sensores reais ([MarelliPid.ecuHandshakePids]),
+  /// excluindo ATRV (tensão de bateria) para não dar falso positivo quando
+  /// apenas o chip ELM327 está alimentado mas a ECU do carro não responde.
   Future<bool> connectEcu({
-    List<MarelliPid> pids = MarelliPid.dashboardLoop,
+    List<MarelliPid> pids = MarelliPid.ecuHandshakePids,
     Duration timeout = const Duration(seconds: 10),
   }) async {
     // Handshake KWP2000 Fast Init com a ECU do Palio (dispara o pulso do ELM327)
+    // Timeout ampliado para 5s para permitir a negociação da linha K
     try {
-      await btManager.sendCommand('01 00', timeout: const Duration(seconds: 2));
-    } catch (_) {}
+      await btManager.sendCommand('01 00', timeout: const Duration(seconds: 5));
+    } catch (_) {
+      try {
+        await btManager.sendCommand('1A 97', timeout: const Duration(seconds: 5));
+      } catch (_) {}
+    }
 
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
@@ -118,8 +129,8 @@ class Obd2Service {
   /// em vez do protocolo proprietário Marelli. Assume que [setupAdapter]
   /// já configurou o ELM327 com `ATSP0` (auto-detect).
   Future<bool> connectStandardObd2({
-    List<StandardObd2Pid> pids = StandardObd2Pid.dashboardLoop,
-    Duration timeout = const Duration(seconds: 5),
+    List<StandardObd2Pid> pids = StandardObd2Pid.ecuHandshakePids,
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     await _logSupportedStandardPids();
     final deadline = DateTime.now().add(timeout);
@@ -392,6 +403,11 @@ class Obd2Service {
         return _last.copyWith(injectionMs: value, timestamp: DateTime.now());
       case MarelliPid.ignitionAdvance:
         return _last.copyWith(ignitionDeg: value, timestamp: DateTime.now());
+      case MarelliPid.fuelLevel:
+        return _last.copyWith(
+          fuelLevelPercent: value,
+          timestamp: DateTime.now(),
+        );
       case MarelliPid.batteryVoltage:
         return _last.copyWith(batteryV: value, timestamp: DateTime.now());
     }
@@ -405,6 +421,21 @@ class Obd2Service {
         return _last.copyWith(speedKmh: value, timestamp: DateTime.now());
       case StandardObd2Pid.coolantTemp:
         return _last.copyWith(coolantTempC: value, timestamp: DateTime.now());
+      case StandardObd2Pid.map:
+        return _last.copyWith(mapKpa: value, timestamp: DateTime.now());
+      case StandardObd2Pid.tps:
+        return _last.copyWith(tpsPercent: value, timestamp: DateTime.now());
+      case StandardObd2Pid.fuelLevel:
+        return _last.copyWith(
+          fuelLevelPercent: value,
+          timestamp: DateTime.now(),
+        );
+      case StandardObd2Pid.intakeTemp:
+        return _last.copyWith(intakeTempC: value, timestamp: DateTime.now());
+      case StandardObd2Pid.ignitionAdvance:
+        return _last.copyWith(ignitionDeg: value, timestamp: DateTime.now());
+      case StandardObd2Pid.batteryVoltage:
+        return _last.copyWith(batteryV: value, timestamp: DateTime.now());
     }
   }
 

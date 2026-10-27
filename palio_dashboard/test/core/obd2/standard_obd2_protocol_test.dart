@@ -57,6 +57,18 @@ void main() {
       final result = parseStandardObd2Response('41 0C\r\n>', expectedPid: 0x0C);
       expect(result, isNull);
     });
+
+    test('parseia resposta ATRV para bateria', () {
+      final result = parseStandardObd2Response('12.6V\r\n>', expectedPid: 0x00);
+      expect(result, isNotNull);
+      expect(StandardObd2Formulas.voltage(result!.dataBytes), closeTo(12.6, 0.1));
+    });
+
+    test('parseia resposta de combustivel (PID 2F)', () {
+      final result = parseStandardObd2Response('41 2F 80\r\n>', expectedPid: 0x2F);
+      expect(result, isNotNull);
+      expect(StandardObd2Formulas.fuelLevel(result!.dataBytes), closeTo(50.2, 0.1));
+    });
   });
 
   group('StandardObd2Formulas', () {
@@ -70,6 +82,40 @@ void main() {
 
     test('temp converte byte único com offset -40', () {
       expect(StandardObd2Formulas.temp([130]), 90.0);
+    });
+
+    test('map retorna o byte direto em kPa', () {
+      expect(StandardObd2Formulas.map([95]), 95.0);
+    });
+
+    test('tps converte para percentual 0 a 100', () {
+      expect(StandardObd2Formulas.tps([0]), 0.0);
+      expect(StandardObd2Formulas.tps([255]), 100.0);
+    });
+
+    test('fuelLevel converte para percentual 0 a 100', () {
+      expect(StandardObd2Formulas.fuelLevel([0]), 0.0);
+      expect(StandardObd2Formulas.fuelLevel([255]), 100.0);
+      expect(StandardObd2Formulas.fuelLevel([128]), closeTo(50.19, 0.05));
+    });
+
+    test('advance converte com offset -64', () {
+      expect(StandardObd2Formulas.advance([128]), 0.0);
+      expect(StandardObd2Formulas.advance([148]), 10.0);
+    });
+  });
+
+  group('StandardObd2Pid loop & handshake configuration', () {
+    test('ecuHandshakePids não contém batteryVoltage', () {
+      expect(StandardObd2Pid.ecuHandshakePids.contains(StandardObd2Pid.batteryVoltage), isFalse);
+      expect(StandardObd2Pid.ecuHandshakePids.contains(StandardObd2Pid.rpm), isTrue);
+    });
+
+    test('dashboardLoop contém monitoramento de combustível e sensores essenciais', () {
+      expect(StandardObd2Pid.dashboardLoop.contains(StandardObd2Pid.rpm), isTrue);
+      expect(StandardObd2Pid.dashboardLoop.contains(StandardObd2Pid.fuelLevel), isTrue);
+      expect(StandardObd2Pid.dashboardLoop.contains(StandardObd2Pid.map), isTrue);
+      expect(StandardObd2Pid.dashboardLoop.contains(StandardObd2Pid.tps), isTrue);
     });
   });
 }

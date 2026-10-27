@@ -13,6 +13,7 @@ class OBDDataModel {
   final double injectionMs;
   final double ignitionDeg;
   final double batteryV;
+  final double fuelLevelPercent;
   final DateTime timestamp;
   final List<String> activeDtcs;
   final bool engineRunning;
@@ -41,6 +42,7 @@ class OBDDataModel {
     required this.injectionMs,
     required this.ignitionDeg,
     required this.batteryV,
+    this.fuelLevelPercent = 0.0,
     required this.timestamp,
     required this.activeDtcs,
     required this.engineRunning,
@@ -60,6 +62,7 @@ class OBDDataModel {
     double? injectionMs,
     double? ignitionDeg,
     double? batteryV,
+    double? fuelLevelPercent,
     DateTime? timestamp,
     List<String>? activeDtcs,
     bool? engineRunning,
@@ -78,6 +81,7 @@ class OBDDataModel {
       injectionMs: injectionMs ?? this.injectionMs,
       ignitionDeg: ignitionDeg ?? this.ignitionDeg,
       batteryV: batteryV ?? this.batteryV,
+      fuelLevelPercent: fuelLevelPercent ?? this.fuelLevelPercent,
       timestamp: timestamp ?? this.timestamp,
       activeDtcs: activeDtcs ?? this.activeDtcs,
       engineRunning: engineRunning ?? this.engineRunning,
@@ -98,6 +102,7 @@ class OBDDataModel {
         'injectionMs': injectionMs,
         'ignitionDeg': ignitionDeg,
         'batteryV': batteryV,
+        'fuelLevelPercent': fuelLevelPercent,
         'timestamp': timestamp.toIso8601String(),
         'activeDtcs': activeDtcs,
         'engineRunning': engineRunning,
@@ -117,6 +122,7 @@ class OBDDataModel {
         injectionMs: (json['injectionMs'] as num).toDouble(),
         ignitionDeg: (json['ignitionDeg'] as num).toDouble(),
         batteryV: (json['batteryV'] as num).toDouble(),
+        fuelLevelPercent: (json['fuelLevelPercent'] as num?)?.toDouble() ?? 0.0,
         timestamp: DateTime.parse(json['timestamp'] as String),
         activeDtcs: List<String>.from(json['activeDtcs'] as List),
         engineRunning: json['engineRunning'] as bool,
@@ -136,6 +142,7 @@ class OBDDataModel {
         injectionMs: 0,
         ignitionDeg: 0,
         batteryV: 0,
+        fuelLevelPercent: 0,
         timestamp: DateTime.now(),
         activeDtcs: const [],
         engineRunning: false,
@@ -161,6 +168,7 @@ class OBDDataModel {
       injectionMs: 3 + 2 * sin(t / 3).abs(),
       ignitionDeg: 10 + 8 * sin(t / 4),
       batteryV: 13.8 + 0.3 * sin(t / 7),
+      fuelLevelPercent: (65.0 - (t / 12) % 20).clamp(0, 100),
       timestamp: DateTime.now(),
       activeDtcs: const [],
       engineRunning: true,

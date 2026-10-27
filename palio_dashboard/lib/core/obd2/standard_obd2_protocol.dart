@@ -43,6 +43,16 @@ StandardObd2ParseResult? parseStandardObd2Response(
   if (cleaned.isEmpty) return null;
   if (isElmFailureResponse(cleaned)) return null;
 
+  // Caso especial: leitura de tensão direta da bateria via comando ATRV (ex: "12.8V")
+  final vMatch =
+      RegExp(r'(\d+\.?\d*)\s*V', caseSensitive: false).firstMatch(cleaned);
+  if (vMatch != null && !cleaned.contains('41')) {
+    final vVal = double.tryParse(vMatch.group(1)!);
+    if (vVal != null) {
+      return StandardObd2ParseResult([(vVal * 10).round()]);
+    }
+  }
+
   final tokens = cleaned
       .toUpperCase()
       .split(RegExp(r'[\s\r\n]+'))
@@ -51,9 +61,17 @@ StandardObd2ParseResult? parseStandardObd2Response(
 
   final bytes = <int>[];
   for (final token in tokens) {
-    final value = int.tryParse(token, radix: 16);
-    if (value == null || value < 0 || value > 0xFF) return null;
-    bytes.add(value);
+    if (token.length > 2 && token.length % 2 == 0) {
+      for (var i = 0; i < token.length; i += 2) {
+        final val = int.tryParse(token.substring(i, i + 2), radix: 16);
+        if (val != null) bytes.add(val);
+      }
+    } else {
+      final value = int.tryParse(token, radix: 16);
+      if (value != null && value >= 0 && value <= 0xFF) {
+        bytes.add(value);
+      }
+    }
   }
 
   for (var i = 0; i < bytes.length - 1; i++) {

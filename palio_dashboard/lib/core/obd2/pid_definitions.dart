@@ -76,6 +76,14 @@ enum MarelliPid {
     max: 64,
     formula: MarelliFormulas.ignition,
   ),
+  fuelLevel(
+    command: '01 2F',
+    label: 'Combustível',
+    unit: '%',
+    min: 0,
+    max: 100,
+    formula: MarelliFormulas.fuelLevel,
+  ),
   batteryVoltage(
     command: 'ATRV',
     label: 'Bateria',
@@ -101,11 +109,28 @@ enum MarelliPid {
   final double max;
   final double Function(List<int> bytes) formula;
 
-  /// PIDs lidos no loop principal do dashboard (Fase 2).
+  /// PIDs lidos no loop principal do dashboard do Palio.
   static const List<MarelliPid> dashboardLoop = [
     rpm,
     speed,
     coolantTemp,
+    map,
+    tps,
+    fuelLevel,
+    intakeTemp,
+    ignitionAdvance,
+    lambda,
+    injectionTime,
     batteryVoltage,
+  ];
+
+  /// PIDs reais emitidos pela ECU usados para validar a conexão ativa com o motor.
+  /// NÃO inclui [batteryVoltage] porque o comando ATRV responde diretamente do
+  /// microcontrolador ELM327 mesmo quando a ECU está desligada/desconectada.
+  static const List<MarelliPid> ecuHandshakePids = [
+    rpm,
+    coolantTemp,
+    speed,
+    map,
   ];
 }

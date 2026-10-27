@@ -96,7 +96,9 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
     if (!btManager.isConnected) {
       await btManager.connect(lastAddress);
     }
-    await obd2Service.setupAdapter(protocol: EcuProtocol.obd2Standard);
+    final manualProtocol = ref.read(manualEcuProtocolProvider);
+    final targetProtocol = manualProtocol ?? EcuProtocol.kwp2000FastInit;
+    await obd2Service.setupAdapter(protocol: targetProtocol);
   } catch (e) {
     ref.read(remoteLogServiceProvider).log(
       LogLevel.error,
@@ -109,12 +111,32 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
     return;
   }
 
-  // Adaptador conectado — a conexão com a ECU é uma etapa separada,
-  // acionada pelo botão "Conectar à ECU" no Dashboard (chama
-  // Obd2Service.connectEcu via currentObd2ServiceProvider).
+  // Adaptador conectado — emite status e inicia detecção da ECU em background
   yield OBDDataModel.empty().copyWith(
     btStatus: ConnectionStatus.connected,
     ecuResponding: false,
   );
+
+  // Inicia handshake e autoconexão com a ECU automaticamente
+  unawaited(() async {
+    try {
+      final manualProtocol = ref.read(manualEcuProtocolProvider);
+      final connectedProtocol = manualProtocol != null
+          ? ((await obd2Service.connectEcuViaProtocol(manualProtocol))
+              ? manualProtocol
+              : null)
+          : await obd2Service.connectEcuAutoDetect();
+      if (connectedProtocol != null) {
+        await obd2Service.startLoop();
+      }
+    } catch (e) {
+      ref.read(remoteLogServiceProvider).log(
+            LogLevel.warn,
+            'dashboard',
+            'Tentativa automática de conexão com a ECU: $e',
+          );
+    }
+  }());
+
   yield* obd2Service.dataStream;
 }

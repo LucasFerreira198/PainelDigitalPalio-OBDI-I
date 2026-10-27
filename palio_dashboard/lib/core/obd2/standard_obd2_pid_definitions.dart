@@ -9,6 +9,16 @@ class StandardObd2Formulas {
   static double speed(List<int> bytes) => bytes[0].toDouble();
 
   static double temp(List<int> bytes) => (bytes[0] - 40).toDouble();
+
+  static double map(List<int> bytes) => bytes[0].toDouble();
+
+  static double tps(List<int> bytes) => bytes[0] * 100.0 / 255.0;
+
+  static double fuelLevel(List<int> bytes) => (bytes[0] * 100.0) / 255.0;
+
+  static double advance(List<int> bytes) => (bytes[0] / 2.0) - 64.0;
+
+  static double voltage(List<int> bytes) => bytes[0] / 10.0;
 }
 
 /// PIDs OBD-II padrão (modo $01) usados como primeira camada de tentativa
@@ -42,6 +52,60 @@ enum StandardObd2Pid {
     min: -40,
     max: 150,
     formula: StandardObd2Formulas.temp,
+  ),
+  map(
+    command: '01 0B',
+    pidByte: 0x0B,
+    label: 'MAP',
+    unit: 'kPa',
+    min: 0,
+    max: 255,
+    formula: StandardObd2Formulas.map,
+  ),
+  tps(
+    command: '01 11',
+    pidByte: 0x11,
+    label: 'TPS',
+    unit: '%',
+    min: 0,
+    max: 100,
+    formula: StandardObd2Formulas.tps,
+  ),
+  fuelLevel(
+    command: '01 2F',
+    pidByte: 0x2F,
+    label: 'Combustível',
+    unit: '%',
+    min: 0,
+    max: 100,
+    formula: StandardObd2Formulas.fuelLevel,
+  ),
+  intakeTemp(
+    command: '01 0F',
+    pidByte: 0x0F,
+    label: 'Temp. admissão',
+    unit: '°C',
+    min: -40,
+    max: 120,
+    formula: StandardObd2Formulas.temp,
+  ),
+  ignitionAdvance(
+    command: '01 0E',
+    pidByte: 0x0E,
+    label: 'Avanço ignição',
+    unit: '°',
+    min: -64,
+    max: 64,
+    formula: StandardObd2Formulas.advance,
+  ),
+  batteryVoltage(
+    command: 'ATRV',
+    pidByte: 0x00,
+    label: 'Bateria',
+    unit: 'V',
+    min: 0,
+    max: 20,
+    formula: StandardObd2Formulas.voltage,
   );
 
   const StandardObd2Pid({
@@ -62,7 +126,24 @@ enum StandardObd2Pid {
   final double max;
   final double Function(List<int> bytes) formula;
 
-  /// PIDs lidos no loop principal do dashboard quando conectado via OBD-II
-  /// padrão.
-  static const List<StandardObd2Pid> dashboardLoop = [rpm, speed, coolantTemp];
+  /// PIDs lidos no loop principal do dashboard quando conectado via OBD-II padrão.
+  static const List<StandardObd2Pid> dashboardLoop = [
+    rpm,
+    speed,
+    coolantTemp,
+    map,
+    tps,
+    fuelLevel,
+    intakeTemp,
+    ignitionAdvance,
+    batteryVoltage,
+  ];
+
+  /// PIDs reais para validação de comunicação com a ECU (exclui ATRV).
+  static const List<StandardObd2Pid> ecuHandshakePids = [
+    rpm,
+    speed,
+    coolantTemp,
+    map,
+  ];
 }
