@@ -99,6 +99,7 @@ class SettingsScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   DropdownButtonFormField<PalioEngineProfile>(
+                    isExpanded: true,
                     initialValue: engineProfile,
                     dropdownColor: AppTheme.surface,
                     decoration: const InputDecoration(
@@ -455,6 +456,7 @@ class SettingsScreen extends ConsumerWidget {
                 vertical: 4,
               ),
               child: DropdownButtonFormField<EcuProtocol?>(
+                isExpanded: true,
                 initialValue: manualProtocol,
                 dropdownColor: AppTheme.surface,
                 decoration: const InputDecoration(border: InputBorder.none),

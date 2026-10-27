@@ -145,28 +145,29 @@ MarelliParseResult? parseMarelliResponse(String raw) {
   if (bytes.isEmpty) return null;
 
   // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 (Formato: [8X] [F1] [10] [41/61] [PID] ... [CS])
-  for (var i = 0; i <= bytes.length - 5; i++) {
-    if (bytes[i + 1] == 0xF1 && bytes[i + 2] == 0x10) {
-      final sResp = bytes[i + 3];
-      if (sResp == 0x41 || sResp == 0x61) {
-        // Valida checksum se o pacote estiver completo
-        final checksum = bytes.last;
-        final computed = bytes
-                .sublist(i, bytes.length - 1)
-                .fold<int>(0, (sum, b) => sum + b) &
-            0xFF;
-        if (computed == checksum || bytes.length >= 6) {
-          final dataBytes = bytes.sublist(i + 5, bytes.length - 1);
-          if (dataBytes.isNotEmpty) {
-            return MarelliParseResult(dataBytes);
-          }
+  if (bytes.length >= 6 && bytes[1] == 0xF1 && bytes[2] == 0x10) {
+    final sResp = bytes[3];
+    if (sResp == 0x41 || sResp == 0x61) {
+      final checksum = bytes.last;
+      final computed = bytes
+              .sublist(0, bytes.length - 1)
+              .fold<int>(0, (sum, b) => sum + b) &
+          0xFF;
+      if (computed == checksum) {
+        final dataBytes = bytes.sublist(5, bytes.length - 1);
+        if (dataBytes.isNotEmpty) {
+          return MarelliParseResult(dataBytes);
         }
       }
     }
+    return null;
   }
 
   // 2. Resposta legada ISO 9141 funcional (48 6B 10 ...)
-  if (bytes.length >= 6 && bytes[0] == 0x48 && bytes[1] == 0x6B) {
+  if (bytes.length >= 6 &&
+      bytes[0] == 0x48 &&
+      bytes[1] == 0x6B &&
+      bytes[2] == 0x10) {
     final checksum = bytes.last;
     final computed = bytes
             .sublist(0, bytes.length - 1)
@@ -178,15 +179,21 @@ MarelliParseResult? parseMarelliResponse(String raw) {
         return MarelliParseResult(dataBytes);
       }
     }
+    return null;
   }
 
-  // 3. Resposta sem cabeçalhos (41/61 <PID> <DADOS...>)
-  for (var i = 0; i < bytes.length - 2; i++) {
-    if (bytes[i] == 0x41 || bytes[i] == 0x61) {
-      final dataBytes = bytes.sublist(i + 2);
-      if (dataBytes.isNotEmpty) {
-        return MarelliParseResult(dataBytes);
-      }
+  // 3. Resposta com cabeçalho de 3 bytes para ECU Marelli (xx xx 10 41/61...), mas header desconhecido
+  if (bytes.length >= 5 &&
+      bytes[2] == 0x10 &&
+      (bytes[3] == 0x41 || bytes[3] == 0x61)) {
+    return null;
+  }
+
+  // 4. Resposta padrão OBD2 sem cabeçalhos (inicia diretamente com 41 ou 61: 41 <PID> <DADOS...>)
+  if (bytes.length >= 3 && (bytes[0] == 0x41 || bytes[0] == 0x61)) {
+    final dataBytes = bytes.sublist(2);
+    if (dataBytes.isNotEmpty) {
+      return MarelliParseResult(dataBytes);
     }
   }
 
