@@ -18,7 +18,7 @@ class PidTile extends StatelessWidget {
     required this.value,
     required this.unit,
     this.icon,
-    this.isWarning = false,
+    bool isWarning = false,
     bool? warning,
     this.accentColor,
     this.theme,

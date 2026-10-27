@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:palio_dashboard/core/ota/ota_provider.dart';
 import 'package:palio_dashboard/core/ota/ota_service.dart';
 import 'package:palio_dashboard/features/dashboard/dashboard_provider.dart';
+import 'package:palio_dashboard/features/settings/settings_provider.dart';
 import 'package:palio_dashboard/features/settings/settings_screen.dart';
 import 'package:palio_dashboard/main.dart';
 import 'package:palio_dashboard/shared/models/obd_data_model.dart';
@@ -89,6 +90,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 6));
 
+      // Com OBD2 conectado e ECU não respondendo, o botão "Conectar à ECU"
+      // aparece — os ícones de DTC/Configurações devem continuar visíveis
+      // ao lado dele, sem estourar o layout (RenderFlex overflow).
       expect(find.text('Conectar à ECU'), findsOneWidget);
       expect(find.byIcon(Icons.warning_amber), findsOneWidget);
       expect(find.byIcon(Icons.settings), findsOneWidget);
@@ -100,8 +104,12 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const ProviderScope(
-        child: MaterialApp(
+      ProviderScope(
+        overrides: [
+          bondedDevicesProvider.overrideWith((ref) => Future.value([])),
+          localIpProvider.overrideWith((ref) => Future.value(null)),
+        ],
+        child: const MaterialApp(
           home: SettingsScreen(),
         ),
       ),

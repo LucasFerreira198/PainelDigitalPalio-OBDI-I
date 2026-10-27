@@ -104,6 +104,35 @@ extension PalioEngineProfileDetails on PalioEngineProfile {
         PalioEngineProfile.standardObd => 'OBD-II Padrão Universal (EOBD)',
       };
 
+  String get displayName => label;
+
+  String get ecuModel => switch (this) {
+        PalioEngineProfile.auto => 'Auto-Detect',
+        PalioEngineProfile.fire10_13_8v => 'IAW 4AF / 59F',
+        PalioEngineProfile.fireFlex10_14 => 'IAW 4SF / 4GF',
+        PalioEngineProfile.fireEvo => 'IAW 7GF',
+        PalioEngineProfile.etorq16v => 'IAW 7GF / Delphi',
+        PalioEngineProfile.standardObd => 'EOBD / Standard',
+      };
+
+  int get redlineRpm => switch (this) {
+        PalioEngineProfile.auto => 6500,
+        PalioEngineProfile.fire10_13_8v => 6500,
+        PalioEngineProfile.fireFlex10_14 => 6500,
+        PalioEngineProfile.fireEvo => 6500,
+        PalioEngineProfile.etorq16v => 6800,
+        PalioEngineProfile.standardObd => 6500,
+      };
+
+  int get maxRpm => switch (this) {
+        PalioEngineProfile.auto => 7000,
+        PalioEngineProfile.fire10_13_8v => 7000,
+        PalioEngineProfile.fireFlex10_14 => 7000,
+        PalioEngineProfile.fireEvo => 7500,
+        PalioEngineProfile.etorq16v => 8000,
+        PalioEngineProfile.standardObd => 8000,
+      };
+
   String get ecuDescription => switch (this) {
         PalioEngineProfile.auto => 'Identificação automática na Linha K',
         PalioEngineProfile.fire10_13_8v => 'Marelli IAW 4AF / 59F • KWP2000 Fast Init',

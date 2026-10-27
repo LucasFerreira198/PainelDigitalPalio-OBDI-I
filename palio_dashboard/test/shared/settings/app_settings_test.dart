@@ -66,16 +66,16 @@ void main() {
       }
     });
 
-    test('Fire 1.0 8V configured with IAW 4AF', () {
-      final p = PalioEngineProfile.fire10_8v;
-      expect(p.ecuModel, 'IAW 4AF / 4EF');
+    test('Fire 1.0 / 1.3 8V configured with IAW 4AF / 59F', () {
+      final p = PalioEngineProfile.fire10_13_8v;
+      expect(p.ecuModel, 'IAW 4AF / 59F');
       expect(p.redlineRpm, 6500);
       expect(p.maxRpm, 7000);
     });
 
-    test('E.torQ 1.6 16V configured with IAW 7GF', () {
-      final p = PalioEngineProfile.etorq16_16v;
-      expect(p.ecuModel, 'IAW 7GF');
+    test('E.torQ 1.6 16V configured with IAW 7GF / Delphi', () {
+      final p = PalioEngineProfile.etorq16v;
+      expect(p.ecuModel, 'IAW 7GF / Delphi');
       expect(p.redlineRpm, 6800);
       expect(p.maxRpm, 8000);
     });
