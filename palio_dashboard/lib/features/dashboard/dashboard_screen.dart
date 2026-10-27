@@ -289,7 +289,7 @@ class DashboardScreen extends ConsumerWidget {
                                         ),
                                       ),
                                       Text(
-                                        '${tempUnit.convert(data.intakeAirTempC).toStringAsFixed(0)} ${tempUnit.label}',
+                                        '${tempUnit.convert(data.intakeTempC).toStringAsFixed(0)} ${tempUnit.label}',
                                         style: AppTheme.digitalDisplay(
                                           fontSize: 18,
                                           color: Colors.white,

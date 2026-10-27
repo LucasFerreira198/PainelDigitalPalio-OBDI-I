@@ -23,11 +23,15 @@ void main() {
     test('EcuProtocol labels identify Fiat protocols correctly', () {
       expect(
         EcuProtocol.kwp2000FastInit.displayLabel,
-        contains('KWP2000 Fast Init'),
+        'KWP2000 (fast init)',
       );
       expect(
-        EcuProtocol.kwp2000FastInit.displayLabel,
-        contains('Fiat Palio'),
+        EcuProtocol.kwp2000SlowInit.displayLabel,
+        'KWP2000 (slow init)',
+      );
+      expect(
+        EcuProtocol.obd2Standard.displayLabel,
+        'OBD-II padrão',
       );
     });
   });
