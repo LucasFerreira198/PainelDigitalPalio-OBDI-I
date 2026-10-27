@@ -153,73 +153,70 @@ class SettingsScreen extends ConsumerWidget {
             color: AppTheme.surface,
             child: Padding(
               padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: ClusterTheme.values.map((theme) {
-                      final isSelected = theme == clusterTheme;
-                      return InkWell(
-                        onTap: () => ref
-                            .read(clusterThemeProvider.notifier)
-                            .set(theme),
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: isSelected
-                                  ? theme.accent
-                                  : Colors.transparent,
-                              width: 2,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: isSelected
-                                ? theme.accent.withOpacity(0.15)
-                                : Colors.transparent,
-                          ),
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: theme.accent,
-                                  shape: BoxShape.circle,
-                                  boxShadow: isSelected
-                                      ? [
-                                          BoxShadow(
-                                            color: theme.accent
-                                                .withOpacity(0.6),
-                                            blurRadius: 8,
-                                          )
-                                        ]
-                                      : null,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                theme.label,
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.white60,
-                                  fontSize: 11,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ],
-                          ),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 10,
+                children: ClusterTheme.values.map((theme) {
+                  final isSelected = theme == clusterTheme;
+                  return InkWell(
+                    onTap: () =>
+                        ref.read(clusterThemeProvider.notifier).set(theme),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: isSelected
+                              ? theme.accent
+                              : Colors.white12,
+                          width: isSelected ? 2 : 1,
                         ),
-                      );
-                    }).toList(),
-                  ),
-                ],
+                        borderRadius: BorderRadius.circular(8),
+                        color: isSelected
+                            ? theme.accent.withOpacity(0.15)
+                            : Colors.transparent,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: theme.accent,
+                              shape: BoxShape.circle,
+                              boxShadow: isSelected
+                                  ? [
+                                      BoxShadow(
+                                        color: theme.accent.withOpacity(0.6),
+                                        blurRadius: 6,
+                                      )
+                                    ]
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            theme.label,
+                            style: TextStyle(
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.white60,
+                              fontSize: 12,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           ),
