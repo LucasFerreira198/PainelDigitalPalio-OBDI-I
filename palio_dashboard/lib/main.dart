@@ -14,6 +14,7 @@ import 'core/ota/ota_update_gate.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/pc_viewer/pc_dashboard_screen.dart';
 import 'firebase_options.dart';
+import 'shared/settings/app_settings_provider.dart';
 import 'shared/theme/app_theme.dart';
 
 /// O app tem dois "modos" conforme a plataforma: no Android é o dashboard
@@ -84,15 +85,17 @@ Future<void> main() async {
   );
 }
 
-class PalioDashApp extends StatelessWidget {
+class PalioDashApp extends ConsumerWidget {
   const PalioDashApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final clusterTheme = ref.watch(clusterThemeProvider);
+
     return MaterialApp(
       title: 'PalioDash',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme: AppTheme.themeFor(clusterTheme),
       home: _isPcViewerPlatform
           ? const PcDashboardScreen()
           : const OtaUpdateGate(child: DashboardScreen()),

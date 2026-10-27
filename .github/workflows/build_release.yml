@@ -36,6 +36,9 @@ jobs:
           sed -i "/^android {/a\\    namespace 'io.github.edufolly.flutterbluetoothserial'" "$GRADLE_FILE"
           cat "$GRADLE_FILE"
 
+      - name: Executar testes automatizados
+        run: flutter test
+
       - name: Configurar keystore de release
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_gauges/gauges.dart';
 
+import '../../../shared/settings/app_settings.dart';
 import '../../../shared/theme/app_theme.dart';
 
 class LambdaGauge extends StatelessWidget {
   final double lambda;
+  final ClusterTheme? theme;
 
-  const LambdaGauge({super.key, required this.lambda});
+  const LambdaGauge({super.key, required this.lambda, this.theme});
 
   @override
   Widget build(BuildContext context) {
+    final accent = theme?.accent ?? AppTheme.accent;
+
     return SfRadialGauge(
       axes: [
         RadialAxis(
@@ -26,8 +30,8 @@ class LambdaGauge extends StatelessWidget {
           pointers: [
             NeedlePointer(
               value: lambda.clamp(0, 2),
-              needleColor: AppTheme.accent,
-              knobStyle: const KnobStyle(color: AppTheme.accent),
+              needleColor: accent,
+              knobStyle: KnobStyle(color: accent),
               animationType: AnimationType.linear,
               enableAnimation: true,
               animationDuration: 100,
@@ -42,7 +46,7 @@ class LambdaGauge extends StatelessWidget {
                 children: [
                   Text(
                     lambda.toStringAsFixed(2),
-                    style: AppTheme.digitalDisplay(fontSize: 24),
+                    style: AppTheme.digitalDisplay(fontSize: 24, color: accent),
                   ),
                   const Text(
                     'λ',

@@ -22,15 +22,15 @@ Future<void> _connectToDevice(
     final btManager = ref.read(btManagerProvider);
     await btManager.connect(device.address);
 
-    // Testa a configuração real do ELM327 aqui, em vez de só confirmar o
-    // socket Bluetooth — evita dizer "conectado" quando o adaptador na
-    // verdade não respondeu. Conectar à ECU é uma etapa separada, feita
-    // pelo botão "Conectar à ECU" no Dashboard.
+    // Inicializa o adaptador com o protocolo selecionado (ou KWP2000 Fast Init padrão Palio)
+    final manualProtocol = ref.read(manualEcuProtocolProvider);
+    final targetProtocol = manualProtocol ?? EcuProtocol.kwp2000FastInit;
+
     final obd2Service = Obd2Service(
       btManager,
       logSink: ref.read(remoteLogServiceProvider).log,
     );
-    await obd2Service.setupAdapter(protocol: EcuProtocol.obd2Standard);
+    await obd2Service.setupAdapter(protocol: targetProtocol);
     await obd2Service.dispose();
 
     ref.read(dataSourceModeProvider.notifier).state = DataSourceMode.live;
@@ -65,6 +65,14 @@ class SettingsScreen extends ConsumerWidget {
     final localIpAsync = ref.watch(localIpProvider);
     final isServerRunning = ref.watch(wsServerRunningProvider);
     final speedUnit = ref.watch(speedUnitProvider);
+    final tempUnit = ref.watch(tempUnitProvider);
+    final pressureUnit = ref.watch(pressureUnitProvider);
+    final clusterTheme = ref.watch(clusterThemeProvider);
+    final shiftLightRpm = ref.watch(shiftLightRpmProvider);
+    final overheatTemp = ref.watch(overheatTempProvider);
+    final lowBatteryAlert = ref.watch(lowBatteryAlertProvider);
+    final showRpmChart = ref.watch(showRpmChartProvider);
+    final engineProfile = ref.watch(palioEngineProfileProvider);
     final dataSourceMode = ref.watch(dataSourceModeProvider);
     final connectingAddress = ref.watch(connectingAddressProvider);
     final cloudCode = ref.watch(cloudRelayCodeProvider);
@@ -74,20 +82,347 @@ class SettingsScreen extends ConsumerWidget {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: AppTheme.surface,
-        title: const Text('Configurações'),
+        title: const Text('Configurações do Painel'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            'Fonte de dados',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
+          // -----------------------------------------------------------
+          // SEÇÃO 1: VEÍCULO & PERFIL PALIO
+          // -----------------------------------------------------------
+          _buildSectionHeader('Veículo & Injeção Eletrônica'),
           Card(
             color: AppTheme.surface,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<PalioEngineProfile>(
+                    initialValue: engineProfile,
+                    dropdownColor: AppTheme.surface,
+                    decoration: const InputDecoration(
+                      labelText: 'Modelo do Palio / Motorização',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      border: UnderlineInputBorder(),
+                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 15),
+                    items: PalioEngineProfile.values
+                        .map(
+                          (profile) => DropdownMenuItem(
+                            value: profile,
+                            child: Text(
+                              '${profile.displayName} (${profile.ecuModel})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        ref
+                            .read(palioEngineProfileProvider.notifier)
+                            .set(value);
+                        // Ajusta shift light automaticamente para a faixa do motor
+                        ref
+                            .read(shiftLightRpmProvider.notifier)
+                            .set((value.redlineRpm - 500).toDouble());
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'ECU: ${engineProfile.ecuModel} • Faixa máx: ${engineProfile.maxRpm} RPM • Linha vermelha: ${engineProfile.redlineRpm} RPM',
+                    style: TextStyle(
+                      color: clusterTheme.accent,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 2: TEMA VISUAL DO CLUSTER
+          // -----------------------------------------------------------
+          _buildSectionHeader('Tema Visual dos Instrumentos'),
+          Card(
+            color: AppTheme.surface,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: ClusterTheme.values.map((theme) {
+                      final isSelected = theme == clusterTheme;
+                      return InkWell(
+                        onTap: () => ref
+                            .read(clusterThemeProvider.notifier)
+                            .set(theme),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: isSelected
+                                  ? theme.accent
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                            color: isSelected
+                                ? theme.accent.withOpacity(0.15)
+                                : Colors.transparent,
+                          ),
+                          child: Column(
+                            children: [
+                              Container(
+                                width: 26,
+                                height: 26,
+                                decoration: BoxDecoration(
+                                  color: theme.accent,
+                                  shape: BoxShape.circle,
+                                  boxShadow: isSelected
+                                      ? [
+                                          BoxShadow(
+                                            color: theme.accent
+                                                .withOpacity(0.6),
+                                            blurRadius: 8,
+                                          )
+                                        ]
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                theme.label,
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.white60,
+                                  fontSize: 11,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 3: ALERTAS DE SEGURANÇA
+          // -----------------------------------------------------------
+          _buildSectionHeader('Alertas & Avisos de Segurança'),
+          Card(
+            color: AppTheme.surface,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Shift Light (Troca de marcha)',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      Text(
+                        '${shiftLightRpm.toStringAsFixed(0)} RPM',
+                        style: TextStyle(
+                          color: clusterTheme.accent,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: shiftLightRpm,
+                    min: 4000,
+                    max: 7500,
+                    divisions: 35,
+                    activeColor: clusterTheme.accent,
+                    label: '${shiftLightRpm.toStringAsFixed(0)} RPM',
+                    onChanged: (val) => ref
+                        .read(shiftLightRpmProvider.notifier)
+                        .set(val.roundToDouble()),
+                  ),
+                  const Divider(color: Colors.white10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Alerta de Superaquecimento',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      Text(
+                        '${tempUnit.convert(overheatTemp).toStringAsFixed(0)} ${tempUnit.label}',
+                        style: const TextStyle(
+                          color: AppTheme.danger,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: overheatTemp,
+                    min: 90,
+                    max: 120,
+                    divisions: 30,
+                    activeColor: AppTheme.danger,
+                    label: '${overheatTemp.toStringAsFixed(0)} °C',
+                    onChanged: (val) => ref
+                        .read(overheatTempProvider.notifier)
+                        .set(val),
+                  ),
+                  const Divider(color: Colors.white10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Aviso de Tensão Baixa da Bateria',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      Text(
+                        '${lowBatteryAlert.toStringAsFixed(1)} V',
+                        style: const TextStyle(
+                          color: AppTheme.warning,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: lowBatteryAlert,
+                    min: 11.0,
+                    max: 12.5,
+                    divisions: 15,
+                    activeColor: AppTheme.warning,
+                    label: '${lowBatteryAlert.toStringAsFixed(1)} V',
+                    onChanged: (val) => ref
+                        .read(lowBatteryAlertProvider.notifier)
+                        .set(val),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 4: UNIDADES DE MEDIDA
+          // -----------------------------------------------------------
+          _buildSectionHeader('Unidades de Medida'),
+          Card(
+            color: AppTheme.surface,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Velocidade',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<SpeedUnit>(
+                      segments: const [
+                        ButtonSegment(value: SpeedUnit.kmh, label: Text('km/h')),
+                        ButtonSegment(value: SpeedUnit.mph, label: Text('mph')),
+                      ],
+                      selected: {speedUnit},
+                      onSelectionChanged: (s) =>
+                          ref.read(speedUnitProvider.notifier).set(s.first),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Temperatura',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<TempUnit>(
+                      segments: const [
+                        ButtonSegment(value: TempUnit.celsius, label: Text('Celsius (°C)')),
+                        ButtonSegment(value: TempUnit.fahrenheit, label: Text('Fahrenheit (°F)')),
+                      ],
+                      selected: {tempUnit},
+                      onSelectionChanged: (s) =>
+                          ref.read(tempUnitProvider.notifier).set(s.first),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Pressão do Coletor (MAP)',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<PressureUnit>(
+                      segments: const [
+                        ButtonSegment(value: PressureUnit.kpa, label: Text('kPa')),
+                        ButtonSegment(value: PressureUnit.bar, label: Text('Bar')),
+                        ButtonSegment(value: PressureUnit.psi, label: Text('PSI')),
+                      ],
+                      selected: {pressureUnit},
+                      onSelectionChanged: (s) =>
+                          ref.read(pressureUnitProvider.notifier).set(s.first),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 5: VISUALIZAÇÃO & GRÁFICOS
+          // -----------------------------------------------------------
+          _buildSectionHeader('Exibição da Telemetria'),
+          Card(
+            color: AppTheme.surface,
+            child: SwitchListTile(
+              title: const Text('Histórico de RPM em Tempo Real'),
+              subtitle: const Text(
+                'Alterna entre gráfico contínuo ou telemetria resumida',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              value: showRpmChart,
+              activeThumbColor: clusterTheme.accent,
+              onChanged: (val) =>
+                  ref.read(showRpmChartProvider.notifier).set(val),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 6: FONTE DE DADOS
+          // -----------------------------------------------------------
+          _buildSectionHeader('Fonte de Dados'),
+          Card(
+            color: AppTheme.surface,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
               child: SegmentedButton<DataSourceMode>(
                 segments: const [
                   ButtonSegment(
@@ -106,109 +441,17 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'Unidade de velocidade',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: AppTheme.surface,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: SegmentedButton<SpeedUnit>(
-                segments: const [
-                  ButtonSegment(value: SpeedUnit.kmh, label: Text('km/h')),
-                  ButtonSegment(value: SpeedUnit.mph, label: Text('mph')),
-                ],
-                selected: {speedUnit},
-                onSelectionChanged: (selection) =>
-                    ref.read(speedUnitProvider.notifier).set(selection.first),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Servidor WebSocket (PC Viewer)',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: AppTheme.surface,
-            child: ListTile(
-              title: localIpAsync.when(
-                data: (ip) => Text(
-                  ip != null ? 'ws://$ip:8765' : 'Sem rede Wi-Fi detectada',
-                  style: AppTheme.digitalDisplay(fontSize: 16),
-                ),
-                loading: () => const Text('Detectando IP...'),
-                error: (_, __) => const Text('Erro ao detectar IP'),
-              ),
-              subtitle: const Text(
-                'Digite este endereço no PC Dashboard',
-                style: TextStyle(color: Colors.white54),
-              ),
-              trailing: Switch(
-                value: isServerRunning,
-                activeThumbColor: AppTheme.accent,
-                onChanged: (value) async {
-                  final server = ref.read(wsServerProvider);
-                  if (value) {
-                    await server.start();
-                  } else {
-                    await server.stop();
-                  }
-                  ref.read(wsServerRunningProvider.notifier).state = value;
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Relé em nuvem (celular e PC em redes diferentes)',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: AppTheme.surface,
-            child: ListTile(
-              title: Text(
-                cloudCode ?? 'Desativado',
-                style: AppTheme.digitalDisplay(fontSize: 16),
-              ),
-              subtitle: const Text(
-                'Gere um código e digite-o no PC Dashboard, sem precisar '
-                'estar na mesma rede Wi-Fi',
-                style: TextStyle(color: Colors.white54),
-              ),
-              trailing: Switch(
-                value: cloudCode != null,
-                activeThumbColor: AppTheme.accent,
-                onChanged: (value) async {
-                  final relay = ref.read(cloudRelayServiceProvider);
-                  if (value) {
-                    final code = CloudRelayService.generateCode();
-                    await relay.startPublishing(code);
-                    ref.read(cloudRelayCodeProvider.notifier).state = code;
-                  } else {
-                    relay.stopPublishing();
-                    ref.read(cloudRelayCodeProvider.notifier).state = null;
-                  }
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Protocolo da ECU',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 7: PROTOCOLO DA ECU
+          // -----------------------------------------------------------
+          _buildSectionHeader('Protocolo da ECU (Reverse Engineered Fiat)'),
           Card(
             color: AppTheme.surface,
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: 16,
                 vertical: 4,
               ),
               child: DropdownButtonFormField<EcuProtocol?>(
@@ -220,7 +463,7 @@ class SettingsScreen extends ConsumerWidget {
                   const DropdownMenuItem<EcuProtocol?>(
                     value: null,
                     child: Text(
-                      'Automático (tenta todos em ordem)',
+                      'Automático (KWP2000 Fast Init Fiat primeiro)',
                     ),
                   ),
                   ...Obd2Service.allProtocolsInOrder.map(
@@ -236,22 +479,19 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(height: 4),
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             child: Text(
-              'No modo automático, "Conectar à ECU" no Dashboard tenta '
-              'cada protocolo em ordem até um responder. Escolha um '
-              'específico aqui se já souber qual funciona no seu carro.',
+              'A maioria dos Fiat Palio (G1 a G4) utiliza ISO 14230-4 KWP2000 Fast Init a 10400 bps na Linha K (Pino 7).',
               style: TextStyle(color: Colors.white38, fontSize: 11),
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'Dispositivos Bluetooth pareados',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 8: BLUETOOTH PAREADO
+          // -----------------------------------------------------------
+          _buildSectionHeader('Adaptador OBD2 Bluetooth'),
           bondedDevicesAsync.when(
             data: (devices) {
               if (devices.isEmpty) {
@@ -267,9 +507,9 @@ class SettingsScreen extends ConsumerWidget {
                       (d) => Card(
                         color: AppTheme.surface,
                         child: ListTile(
-                          leading: const Icon(
+                          leading: Icon(
                             Icons.bluetooth,
-                            color: AppTheme.accent,
+                            color: clusterTheme.accent,
                           ),
                           title: Text(d.name),
                           subtitle: Text(
@@ -277,12 +517,12 @@ class SettingsScreen extends ConsumerWidget {
                             style: const TextStyle(color: Colors.white54),
                           ),
                           trailing: connectingAddress == d.address
-                              ? const SizedBox(
+                              ? SizedBox(
                                   width: 20,
                                   height: 20,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: AppTheme.accent,
+                                    color: clusterTheme.accent,
                                   ),
                                 )
                               : const Icon(
@@ -308,20 +548,102 @@ class SettingsScreen extends ConsumerWidget {
           OutlinedButton.icon(
             onPressed: () => ref.invalidate(bondedDevicesProvider),
             icon: const Icon(Icons.refresh),
-            label: const Text('Atualizar lista'),
+            label: const Text('Atualizar lista de dispositivos'),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'Atualizações',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 9: WEBSOCKET & CLOUD RELAY
+          // -----------------------------------------------------------
+          _buildSectionHeader('PC Viewer & Espelhamento'),
+          Card(
+            color: AppTheme.surface,
+            child: Column(
+              children: [
+                ListTile(
+                  title: localIpAsync.when(
+                    data: (ip) => Text(
+                      ip != null ? 'ws://$ip:8765' : 'Sem rede Wi-Fi detectada',
+                      style: AppTheme.digitalDisplay(fontSize: 16),
+                    ),
+                    loading: () => const Text('Detectando IP...'),
+                    error: (_, __) => const Text('Erro ao detectar IP'),
+                  ),
+                  subtitle: const Text(
+                    'Servidor local para o PC Viewer na mesma rede Wi-Fi',
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                  trailing: Switch(
+                    value: isServerRunning,
+                    activeThumbColor: clusterTheme.accent,
+                    onChanged: (value) async {
+                      final server = ref.read(wsServerProvider);
+                      if (value) {
+                        await server.start();
+                      } else {
+                        await server.stop();
+                      }
+                      ref.read(wsServerRunningProvider.notifier).state = value;
+                    },
+                  ),
+                ),
+                const Divider(color: Colors.white10),
+                ListTile(
+                  title: Text(
+                    cloudCode ?? 'Desativado',
+                    style: AppTheme.digitalDisplay(fontSize: 16),
+                  ),
+                  subtitle: const Text(
+                    'Relé em nuvem (PC e celular em redes separadas)',
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                  trailing: Switch(
+                    value: cloudCode != null,
+                    activeThumbColor: clusterTheme.accent,
+                    onChanged: (value) async {
+                      final relay = ref.read(cloudRelayServiceProvider);
+                      if (value) {
+                        final code = CloudRelayService.generateCode();
+                        await relay.startPublishing(code);
+                        ref.read(cloudRelayCodeProvider.notifier).state = code;
+                      } else {
+                        relay.stopPublishing();
+                        ref.read(cloudRelayCodeProvider.notifier).state = null;
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
+
+          // -----------------------------------------------------------
+          // SEÇÃO 10: ATUALIZAÇÕES
+          // -----------------------------------------------------------
+          _buildSectionHeader('Atualizações do Aplicativo'),
           OutlinedButton.icon(
             onPressed: () => checkAndPromptUpdate(context, ref),
             icon: const Icon(Icons.system_update),
-            label: const Text('Verificar atualizações'),
+            label: const Text('Verificar atualizações (OTA)'),
           ),
+          const SizedBox(height: 32),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, left: 4),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white70,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }
