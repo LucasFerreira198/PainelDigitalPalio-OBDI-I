@@ -23,18 +23,20 @@ Future<void> _connectEcu(BuildContext context, WidgetRef ref) async {
   final service = ref.read(currentObd2ServiceProvider);
   if (service == null) return;
   if (service.isLoopRunning && service.lastEcuResponding) return;
-  service.stopLoop();
+  if (ref.read(connectingEcuProvider)) return;
 
   ref.read(connectingEcuProvider.notifier).state = true;
+  service.stopLoop();
+
   try {
     final manualProtocol = ref.read(manualEcuProtocolProvider);
-    EcuProtocol? protocol;
-    if (manualProtocol != null) {
-      final ok = await service.connectEcuViaProtocol(manualProtocol);
-      protocol = ok ? manualProtocol : null;
-    } else {
-      protocol = await service.connectEcuAutoDetect();
-    }
+    final protocol = await (manualProtocol != null
+            ? service
+                .connectEcuViaProtocol(manualProtocol)
+                .then((ok) => ok ? manualProtocol : null)
+            : service.connectEcuAutoDetect())
+        .timeout(const Duration(seconds: 22), onTimeout: () => null);
+
     if (protocol != null) {
       unawaited(service.startLoop());
     }
@@ -43,13 +45,23 @@ Future<void> _connectEcu(BuildContext context, WidgetRef ref) async {
         SnackBar(
           content: Text(
             protocol != null
-                ? 'ECU conectada via ${protocol.displayLabel}'
+                ? 'ECU conectada via ${protocol.displayLabel}!'
                 : manualProtocol != null
-                    ? '${manualProtocol.displayLabel} não respondeu '
-                        '(verifique a ignição)'
-                    : 'ECU não respondeu em nenhum protocolo (verifique a '
-                        'ignição)',
+                    ? '${manualProtocol.displayLabel} não respondeu. Ligue a chave de ignição.'
+                    : 'ECU não respondeu. Verifique se a ignição está ligada.',
           ),
+          backgroundColor:
+              protocol != null ? Colors.green.shade800 : Colors.red.shade800,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao conectar à ECU: $e'),
+          backgroundColor: Colors.red.shade800,
         ),
       );
     }
@@ -409,16 +421,29 @@ class DashboardScreen extends ConsumerWidget {
                                   if (canConnectEcu)
                                     Expanded(
                                       child: connectingEcu
-                                          ? const Center(
-                                              child: SizedBox(
-                                                width: 14,
-                                                height: 14,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: AppTheme.accent,
+                                          ? Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                SizedBox(
+                                                  width: compact ? 10 : 12,
+                                                  height: compact ? 10 : 12,
+                                                  child:
+                                                      const CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    color: AppTheme.accent,
+                                                  ),
                                                 ),
-                                              ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  'Conectando...',
+                                                  style: TextStyle(
+                                                    fontSize:
+                                                        compact ? 8 : 10,
+                                                    color: AppTheme.accent,
+                                                  ),
+                                                ),
+                                              ],
                                             )
                                           : TextButton(
                                               style: TextButton.styleFrom(

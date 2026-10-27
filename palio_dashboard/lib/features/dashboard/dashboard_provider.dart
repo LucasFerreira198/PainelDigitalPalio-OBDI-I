@@ -117,8 +117,10 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
     ecuResponding: false,
   );
 
-  // Inicia handshake e autoconexão com a ECU automaticamente
+  // Inicia handshake e autoconexão com a ECU automaticamente, sincronizando
+  // o estado do provider para que a UI mostre o progresso e não permita cliques duplicados
   unawaited(() async {
+    ref.read(connectingEcuProvider.notifier).state = true;
     try {
       final manualProtocol = ref.read(manualEcuProtocolProvider);
       final connectedProtocol = manualProtocol != null
@@ -135,6 +137,8 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
             'dashboard',
             'Tentativa automática de conexão com a ECU: $e',
           );
+    } finally {
+      ref.read(connectingEcuProvider.notifier).state = false;
     }
   }());
 

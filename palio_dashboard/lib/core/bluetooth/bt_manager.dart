@@ -17,6 +17,11 @@ class BtCommandTimeoutException implements Exception {
   String toString() => 'Timeout aguardando resposta para "$command"';
 }
 
+class BtCommandCancelledException implements Exception {
+  @override
+  String toString() => 'BtCommandCancelledException: comando cancelado';
+}
+
 class _QueuedCommand {
   final String command;
   final Duration timeout;
@@ -86,20 +91,35 @@ class BtManager {
   }
 
   Future<void> disconnect() async {
-    _timeoutTimer?.cancel();
-    _timeoutTimer = null;
+    clearQueue();
     await _inputSubscription?.cancel();
     _inputSubscription = null;
     await _connection?.finish();
     _connection = null;
+  }
 
-    final pendingError = StateError('Conexão Bluetooth encerrada');
-    _inFlight?.completer.completeError(pendingError);
-    _inFlight = null;
-    for (final queued in _queue) {
-      queued.completer.completeError(pendingError);
+  /// Descarta imediatamente qualquer comando em voo e esvazia a fila de
+  /// comandos pendentes, completando seus futuros com erro de cancelamento.
+  /// Essencial para evitar que dezenas de comandos obsoletos bloqueiem novas
+  /// tentativas de conexão à ECU ou mudanças de protocolo.
+  void clearQueue() {
+    _timeoutTimer?.cancel();
+    _timeoutTimer = null;
+    final cancelError = BtCommandCancelledException();
+    if (_inFlight != null) {
+      final current = _inFlight!;
+      _inFlight = null;
+      if (!current.completer.isCompleted) {
+        current.completer.completeError(cancelError);
+      }
     }
-    _queue.clear();
+    while (_queue.isNotEmpty) {
+      final next = _queue.removeFirst();
+      if (!next.completer.isCompleted) {
+        next.completer.completeError(cancelError);
+      }
+    }
+    _buffer.clear();
   }
 
   /// Envia um comando AT/Marelli e aguarda a resposta completa (até o '>').

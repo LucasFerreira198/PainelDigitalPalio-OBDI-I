@@ -79,7 +79,7 @@ const List<String> kElm327SetupKwp2000FastInit = [
   'ATAT0',
   'ATSP5',
   'ATIB10',
-  'ATH1',
+  'ATH0',
   'ATSH8210F1',
   'ATST96',
 ];
@@ -98,6 +98,10 @@ bool isElmFailureResponse(String raw) {
       upper.contains('ERROR') ||
       upper.contains('UNABLE TO CONNECT') ||
       upper.contains('STOPPED') ||
+      upper.contains('BUS BUSY') ||
+      upper.contains('FB ERROR') ||
+      upper.contains('DATA ERROR') ||
+      upper.contains('7F ') ||
       upper.contains('?');
 }
 

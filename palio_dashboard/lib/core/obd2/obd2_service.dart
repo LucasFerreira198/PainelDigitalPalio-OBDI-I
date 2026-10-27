@@ -53,6 +53,7 @@ class Obd2Service {
   bool _running = false;
 
   EcuProtocol? _activeLayer;
+  Future<EcuProtocol?>? _activeConnection;
 
   /// Camada de protocolo que respondeu na última conexão bem-sucedida, ou
   /// null se nenhuma conexão com a ECU foi estabelecida ainda.
@@ -84,67 +85,76 @@ class Obd2Service {
     _last = _last.copyWith(btStatus: ConnectionStatus.connected);
   }
 
-  /// Tenta ler os PIDs Marelli repetidamente até algum responder com
-  /// sucesso (ECU respondendo) ou até [timeout] esgotar. Assume que
-  /// [setupAdapter] já configurou o ELM327 para KWP2000 ou ISO9141-2.
-  /// Tenta ler os PIDs Marelli repetidamente até algum responder com
-  /// sucesso (ECU respondendo) ou até [timeout] esgotar. Assume que
-  /// [setupAdapter] já configurou o ELM327 para KWP2000 ou ISO9141-2.
-  /// Por padrão valida usando apenas PIDs de sensores reais ([MarelliPid.ecuHandshakePids]),
-  /// excluindo ATRV (tensão de bateria) para não dar falso positivo quando
-  /// apenas o chip ELM327 está alimentado mas a ECU do carro não responde.
+  /// Valida se a ECU responde via protocolo Marelli KWP2000 / ISO9141.
+  /// Testa primeiro a rotação (RPM - PID 01 0C) com timeout ampliado para
+  /// permitir o pulso Fast Init na linha K. Se responder, a conexão com a ECU
+  /// é confirmada quase imediatamente. Em caso de falha, tenta temperatura
+  /// e comando 1A 97 como alternativas rápidas.
   Future<bool> connectEcu({
     List<MarelliPid> pids = MarelliPid.ecuHandshakePids,
-    Duration timeout = const Duration(seconds: 10),
+    Duration timeout = const Duration(seconds: 4),
   }) async {
-    // Handshake KWP2000 Fast Init com a ECU do Palio (dispara o pulso do ELM327)
-    // Timeout ampliado para 5s para permitir a negociação da linha K
-    try {
-      await btManager.sendCommand('01 00', timeout: const Duration(seconds: 5));
-    } catch (_) {
-      try {
-        await btManager.sendCommand('1A 97', timeout: const Duration(seconds: 5));
-      } catch (_) {}
+    // 1. Tenta RPM diretamente com timeout generoso para o pulso Fast Init
+    if (await _readPid(MarelliPid.rpm, timeout: const Duration(milliseconds: 3500))) {
+      _last = _last.copyWith(ecuResponding: true);
+      _dataController.add(_last);
+      return true;
     }
 
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      if (await _runMarelliCycle(pids)) {
+    // 2. Fallback: temperatura do motor (PID 01 05)
+    if (await _readPid(MarelliPid.coolantTemp, timeout: const Duration(seconds: 2))) {
+      _last = _last.copyWith(ecuResponding: true);
+      _dataController.add(_last);
+      return true;
+    }
+
+    // 3. Fallback: comando de identificação Marelli KWP2000 (1A 97)
+    try {
+      final idRaw = await btManager.sendCommand('1A 97', timeout: const Duration(seconds: 2));
+      if (!isElmFailureResponse(idRaw)) {
         _last = _last.copyWith(ecuResponding: true);
         _dataController.add(_last);
         return true;
       }
-    }
+    } catch (_) {}
+
     _logSink?.call(
       LogLevel.warn,
       'obd2',
-      'Nenhum PID Marelli respondeu em ${timeout.inSeconds}s',
+      'ECU Marelli não respondeu aos comandos de handshake rápido',
     );
     _last = _last.copyWith(ecuResponding: false);
     _dataController.add(_last);
     return false;
   }
 
-  /// Equivalente a [connectEcu], mas usando PIDs OBD-II padrão (modo $01)
-  /// em vez do protocolo proprietário Marelli. Assume que [setupAdapter]
-  /// já configurou o ELM327 com `ATSP0` (auto-detect).
+  /// Equivalente a [connectEcu], mas usando PIDs OBD-II padrão (modo $01).
+  /// Envia PID 01 0C (RPM) com timeout de 4.5s para conceder ao ELM327 o
+  /// tempo de varredura de barramento do ATSP0 (SEARCHING...). Se responder,
+  /// valida a ECU de imediato sem esperas desnecessárias.
   Future<bool> connectStandardObd2({
     List<StandardObd2Pid> pids = StandardObd2Pid.ecuHandshakePids,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 5),
   }) async {
-    await _logSupportedStandardPids();
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      if (await _runStandardCycle(pids)) {
-        _last = _last.copyWith(ecuResponding: true);
-        _dataController.add(_last);
-        return true;
-      }
+    if (await _readStandardPid(StandardObd2Pid.rpm, timeout: const Duration(milliseconds: 4500))) {
+      _last = _last.copyWith(ecuResponding: true);
+      _dataController.add(_last);
+      unawaited(_logSupportedStandardPids());
+      return true;
     }
+
+    // Fallback: temperatura do motor (PID 01 05)
+    if (await _readStandardPid(StandardObd2Pid.coolantTemp, timeout: const Duration(seconds: 2))) {
+      _last = _last.copyWith(ecuResponding: true);
+      _dataController.add(_last);
+      unawaited(_logSupportedStandardPids());
+      return true;
+    }
+
     _logSink?.call(
       LogLevel.warn,
       'obd2',
-      'Nenhum PID OBD-II padrão respondeu em ${timeout.inSeconds}s',
+      'ECU OBD-II padrão não respondeu aos comandos de handshake rápido',
     );
     _last = _last.copyWith(ecuResponding: false);
     _dataController.add(_last);
@@ -162,11 +172,11 @@ class Obd2Service {
 
   /// Configura o adaptador para [protocol] e tenta ler os PIDs
   /// correspondentes uma única vez (sem passar para outra camada em caso
-  /// de falha). Usado tanto pelo modo manual (usuário escolhe o
-  /// protocolo) quanto internamente por [connectEcuAutoDetect].
+  /// de falha). Limpa a fila Bluetooth antes de iniciar para evitar comandos
+  /// pendentes ou atrasados.
   Future<bool> connectEcuViaProtocol(
     EcuProtocol protocol, {
-    Duration timeout = const Duration(seconds: 14),
+    Duration timeout = const Duration(seconds: 5),
     bool rememberOnSuccess = true,
   }) async {
     _logSink?.call(
@@ -174,6 +184,7 @@ class Obd2Service {
       'obd2',
       'Tentando ECU via ${protocol.displayLabel}...',
     );
+    btManager.clearQueue();
     try {
       await setupAdapter(protocol: protocol);
     } catch (e) {
@@ -207,16 +218,32 @@ class Obd2Service {
     return ok;
   }
 
-  /// Tenta conectar à ECU percorrendo as camadas de protocolo em ordem:
-  /// OBD-II padrão (mais simples e confiável quando o carro suporta) →
-  /// Marelli proprietário via KWP2000 fast-init → KWP2000 slow-init →
-  /// ISO9141-2 real. Lembra qual camada respondeu (SharedPreferences) e
-  /// tenta essa primeiro nas próximas conexões, evitando repetir as
-  /// tentativas que já se sabe que falham neste carro. Retorna a camada
-  /// que respondeu, ou null se nenhuma respondeu.
+  /// Tenta conectar à ECU percorrendo as camadas de protocolo em ordem.
+  /// Possui mutex interno (_activeConnection) para garantir que chamadas
+  /// concorrentes da UI ou de background compartilhem a mesma tentativa em
+  /// andamento, impedindo enfileiramento duplo de comandos no Bluetooth.
   Future<EcuProtocol?> connectEcuAutoDetect({
-    Duration perLayerTimeout = const Duration(seconds: 14),
+    Duration perLayerTimeout = const Duration(seconds: 5),
     bool rememberSuccess = true,
+  }) async {
+    if (_activeConnection != null) {
+      return _activeConnection;
+    }
+    final future = _performAutoDetect(
+      perLayerTimeout: perLayerTimeout,
+      rememberSuccess: rememberSuccess,
+    );
+    _activeConnection = future;
+    try {
+      return await future;
+    } finally {
+      _activeConnection = null;
+    }
+  }
+
+  Future<EcuProtocol?> _performAutoDetect({
+    required Duration perLayerTimeout,
+    required bool rememberSuccess,
   }) async {
     final remembered = rememberSuccess ? await _loadLastLayer() : null;
     final tryOrder = remembered == null
@@ -271,6 +298,7 @@ class Obd2Service {
 
   void stopLoop() {
     _running = false;
+    btManager.clearQueue();
   }
 
   /// Lê todos os [pids] Marelli uma vez; retorna true se algum respondeu.
@@ -293,9 +321,12 @@ class Obd2Service {
   }
 
   /// Retorna true se o PID Marelli foi lido e parseado com sucesso.
-  Future<bool> _readPid(MarelliPid pid) async {
+  Future<bool> _readPid(MarelliPid pid, {Duration? timeout}) async {
     try {
-      final raw = await btManager.sendCommand(pid.command);
+      final raw = await btManager.sendCommand(
+        pid.command,
+        timeout: timeout ?? BtManager.defaultTimeout,
+      );
       final parsed = parseMarelliResponse(raw);
       if (parsed == null) {
         if (_loggedFailures.add(pid)) {
@@ -313,7 +344,8 @@ class Obd2Service {
       _last = _applyPidValue(pid, value);
       return true;
     } on BtCommandTimeoutException {
-      // ECU não respondeu a este PID neste ciclo — já logado pelo BtManager.
+      return false;
+    } on BtCommandCancelledException {
       return false;
     }
   }
@@ -359,9 +391,12 @@ class Obd2Service {
   }
 
   /// Retorna true se o PID OBD-II padrão foi lido e parseado com sucesso.
-  Future<bool> _readStandardPid(StandardObd2Pid pid) async {
+  Future<bool> _readStandardPid(StandardObd2Pid pid, {Duration? timeout}) async {
     try {
-      final raw = await btManager.sendCommand(pid.command);
+      final raw = await btManager.sendCommand(
+        pid.command,
+        timeout: timeout ?? BtManager.defaultTimeout,
+      );
       final parsed = parseStandardObd2Response(raw, expectedPid: pid.pidByte);
       if (parsed == null) {
         if (_loggedStandardFailures.add(pid)) {
@@ -379,6 +414,8 @@ class Obd2Service {
       _last = _applyStandardPidValue(pid, value);
       return true;
     } on BtCommandTimeoutException {
+      return false;
+    } on BtCommandCancelledException {
       return false;
     }
   }
