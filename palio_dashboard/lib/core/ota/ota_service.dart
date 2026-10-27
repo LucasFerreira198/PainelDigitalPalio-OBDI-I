@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
-const String githubOwner = 'BREK1N';
+const String githubOwner = 'LucasFerreira198';
 const String githubRepo = 'PainelDigitalPalio-OBDI-I';
 
 class OtaUpdateInfo {

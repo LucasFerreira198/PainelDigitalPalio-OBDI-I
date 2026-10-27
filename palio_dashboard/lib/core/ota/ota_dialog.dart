@@ -19,7 +19,10 @@ Future<void> checkAndPromptUpdate(
     update = await otaService.checkForUpdate();
   } catch (e) {
     if (!silent && context.mounted) {
-      _showError(context, 'Falha ao verificar atualização: $e');
+      final msg = e.toString().contains('404')
+          ? 'Nenhuma atualização encontrada ou repositório não acessível (404).'
+          : 'Falha ao verificar atualização: $e';
+      _showError(context, msg);
     }
     return;
   }
