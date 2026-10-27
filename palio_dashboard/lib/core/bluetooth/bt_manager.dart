@@ -22,6 +22,24 @@ class BtCommandCancelledException implements Exception {
   String toString() => 'BtCommandCancelledException: comando cancelado';
 }
 
+enum BtTrafficType { tx, rx, info, error }
+
+class BtTrafficLog {
+  final DateTime timestamp;
+  final BtTrafficType type;
+  final String text;
+
+  const BtTrafficLog({
+    required this.timestamp,
+    required this.type,
+    required this.text,
+  });
+
+  bool get isTx => type == BtTrafficType.tx;
+  bool get isRx => type == BtTrafficType.rx;
+  bool get isError => type == BtTrafficType.error;
+}
+
 class _QueuedCommand {
   final String command;
   final Duration timeout;
@@ -61,6 +79,33 @@ class BtManager {
 
   final List<int> _buffer = [];
 
+  final StreamController<BtTrafficLog> _trafficController =
+      StreamController<BtTrafficLog>.broadcast();
+  final List<BtTrafficLog> _trafficHistory = [];
+  static const int _maxTrafficHistory = 300;
+
+  Stream<BtTrafficLog> get trafficStream => _trafficController.stream;
+  List<BtTrafficLog> get trafficHistory => List.unmodifiable(_trafficHistory);
+
+  void logTraffic(BtTrafficType type, String text) {
+    final entry = BtTrafficLog(
+      timestamp: DateTime.now(),
+      type: type,
+      text: text,
+    );
+    if (_trafficHistory.length >= _maxTrafficHistory) {
+      _trafficHistory.removeAt(0);
+    }
+    _trafficHistory.add(entry);
+    if (!_trafficController.isClosed) {
+      _trafficController.add(entry);
+    }
+  }
+
+  void clearTrafficLogs() {
+    _trafficHistory.clear();
+  }
+
   bool get isConnected => _connection?.isConnected ?? false;
 
   Future<List<BtDeviceModel>> getBondedDevices() async {
@@ -72,16 +117,20 @@ class BtManager {
   Future<void> connect(String address) async {
     await ensureBluetoothPermissions();
     await disconnect();
+    logTraffic(BtTrafficType.info, 'Conectando ao Bluetooth ($address)...');
     try {
       _connection = await BluetoothConnection.toAddress(address);
     } catch (e) {
+      logTraffic(BtTrafficType.error, 'Falha ao conectar via Bluetooth: $e');
       _logSink?.call(LogLevel.error, 'bt', 'Falha ao conectar a $address: $e');
       rethrow;
     }
     _buffer.clear();
+    logTraffic(BtTrafficType.info, 'Bluetooth conectado com sucesso a $address');
     _inputSubscription = _connection!.input?.listen(
       _onBytesReceived,
       onDone: () {
+        logTraffic(BtTrafficType.error, 'Conexão Bluetooth perdida/fechada');
         _logSink?.call(LogLevel.warn, 'bt', 'Conexão Bluetooth perdida');
         disconnect();
       },
@@ -96,6 +145,7 @@ class BtManager {
     _inputSubscription = null;
     await _connection?.finish();
     _connection = null;
+    logTraffic(BtTrafficType.info, 'Bluetooth desconectado');
   }
 
   /// Descarta imediatamente qualquer comando em voo e esvazia a fila de
@@ -106,20 +156,26 @@ class BtManager {
     _timeoutTimer?.cancel();
     _timeoutTimer = null;
     final cancelError = BtCommandCancelledException();
+    var cancelledCount = 0;
     if (_inFlight != null) {
       final current = _inFlight!;
       _inFlight = null;
+      cancelledCount++;
       if (!current.completer.isCompleted) {
         current.completer.completeError(cancelError);
       }
     }
     while (_queue.isNotEmpty) {
       final next = _queue.removeFirst();
+      cancelledCount++;
       if (!next.completer.isCompleted) {
         next.completer.completeError(cancelError);
       }
     }
     _buffer.clear();
+    if (cancelledCount > 0) {
+      logTraffic(BtTrafficType.info, 'Fila de comandos limpa ($cancelledCount comandos)');
+    }
   }
 
   /// Envia um comando AT/Marelli e aguarda a resposta completa (até o '>').
@@ -130,6 +186,7 @@ class BtManager {
     Duration timeout = defaultTimeout,
   }) {
     if (!isConnected) {
+      logTraffic(BtTrafficType.error, 'Falha ao enviar "$command": Bluetooth desconectado');
       return Future.error(StateError('Bluetooth não conectado'));
     }
     final queued = _QueuedCommand(command, timeout);
@@ -144,11 +201,16 @@ class BtManager {
     _inFlight = next;
     _buffer.clear();
 
+    logTraffic(BtTrafficType.tx, next.command);
     _connection!.output.add(ascii.encode('${next.command}\r'));
 
     _timeoutTimer = Timer(next.timeout, () {
       if (_inFlight == next) {
         _inFlight = null;
+        logTraffic(
+          BtTrafficType.error,
+          'TIMEOUT (${next.timeout.inMilliseconds}ms) aguardando resposta para "${next.command}"',
+        );
         _logSink?.call(
           LogLevel.warn,
           'bt',
@@ -170,6 +232,10 @@ class BtManager {
     final current = _inFlight;
     _inFlight = null;
     _buffer.clear();
+
+    final cleanedResponse = text.replaceAll('\r', ' ').replaceAll('\n', ' ').trim();
+    logTraffic(BtTrafficType.rx, cleanedResponse);
+
     current?.completer.complete(text);
     _pumpQueue();
   }

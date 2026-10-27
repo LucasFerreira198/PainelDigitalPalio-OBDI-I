@@ -8,6 +8,7 @@ import '../../shared/models/obd_data_model.dart';
 import '../../shared/settings/app_settings.dart';
 import '../../shared/settings/app_settings_provider.dart';
 import '../../shared/theme/app_theme.dart';
+import '../diagnostics/test_obd_screen.dart';
 import '../dtc/dtc_screen.dart';
 import '../settings/settings_screen.dart';
 import 'dashboard_provider.dart';
@@ -22,36 +23,25 @@ import 'widgets/temp_gauge.dart';
 Future<void> _connectEcu(BuildContext context, WidgetRef ref) async {
   final service = ref.read(currentObd2ServiceProvider);
   if (service == null) return;
-  if (service.isLoopRunning && service.lastEcuResponding) return;
   if (ref.read(connectingEcuProvider)) return;
 
   ref.read(connectingEcuProvider.notifier).state = true;
-  service.stopLoop();
 
   try {
-    final manualProtocol = ref.read(manualEcuProtocolProvider);
-    final protocol = await (manualProtocol != null
-            ? service
-                .connectEcuViaProtocol(manualProtocol)
-                .then((ok) => ok ? manualProtocol : null)
-            : service.connectEcuAutoDetect())
-        .timeout(const Duration(seconds: 22), onTimeout: () => null);
-
-    if (protocol != null) {
+    final ok = await service.connectEcu();
+    if (!service.isLoopRunning) {
       unawaited(service.startLoop());
     }
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            protocol != null
-                ? 'ECU conectada via ${protocol.displayLabel}!'
-                : manualProtocol != null
-                    ? '${manualProtocol.displayLabel} não respondeu. Ligue a chave de ignição.'
-                    : 'ECU não respondeu. Verifique se a ignição está ligada.',
+            ok
+                ? 'ECU Marelli IAW 4AF conectada com sucesso!'
+                : 'ECU não respondeu. Ligue a chave de ignição e tente novamente.',
           ),
           backgroundColor:
-              protocol != null ? Colors.green.shade800 : Colors.red.shade800,
+              ok ? Colors.green.shade800 : Colors.red.shade800,
           duration: const Duration(seconds: 4),
         ),
       );
@@ -467,6 +457,24 @@ class DashboardScreen extends ConsumerWidget {
                                               ),
                                             ),
                                     ),
+                                  IconButton(
+                                    iconSize: iconSize,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(
+                                      Icons.terminal_rounded,
+                                      color: AppTheme.accent,
+                                    ),
+                                    tooltip: 'Diagnóstico & Teste IAW 4AF',
+                                    onPressed: () =>
+                                        Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const TestObdScreen(),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
                                   IconButton(
                                     iconSize: iconSize,
                                     padding: EdgeInsets.zero,

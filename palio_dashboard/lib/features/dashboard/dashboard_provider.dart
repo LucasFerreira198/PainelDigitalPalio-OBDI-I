@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/diagnostics/diagnostics_provider.dart';
 import '../../core/diagnostics/remote_log_service.dart';
+import '../../core/obd2/marelli_protocol.dart';
 import '../../core/obd2/obd2_service.dart';
 import '../../shared/models/obd_data_model.dart';
 import '../settings/settings_provider.dart';
@@ -96,9 +97,8 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
     if (!btManager.isConnected) {
       await btManager.connect(lastAddress);
     }
-    final manualProtocol = ref.read(manualEcuProtocolProvider);
-    final targetProtocol = manualProtocol ?? EcuProtocol.kwp2000FastInit;
-    await obd2Service.setupAdapter(protocol: targetProtocol);
+    // Protocolo fixo Palio Fire: Marelli IAW 4AF EOBD (KWP2000 Fast Init @ 10400 bps)
+    await obd2Service.setupAdapter(protocol: EcuProtocol.kwp2000FastInit);
   } catch (e) {
     ref.read(remoteLogServiceProvider).log(
       LogLevel.error,
@@ -111,34 +111,39 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
     return;
   }
 
-  // Adaptador conectado — emite status e inicia detecção da ECU em background
+  // Adaptador conectado e configurado! Lê tensão da bateria (ATRV) imediatamente
+  // para que o mostrador de bateria nunca fique em branco ou zerado
+  double initialBattery = 0.0;
+  try {
+    final vRaw = await btManager.sendCommand('ATRV', timeout: const Duration(milliseconds: 1500));
+    final parsed = parseMarelliResponse(vRaw);
+    if (parsed != null && parsed.dataBytes.isNotEmpty) {
+      initialBattery = MarelliFormulas.voltage(parsed.dataBytes);
+    }
+  } catch (_) {}
+
   yield OBDDataModel.empty().copyWith(
     btStatus: ConnectionStatus.connected,
+    batteryV: initialBattery,
     ecuResponding: false,
+    ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
   );
 
-  // Inicia handshake e autoconexão com a ECU automaticamente, sincronizando
-  // o estado do provider para que a UI mostre o progresso e não permita cliques duplicados
+  // Inicia o handshake KWP2000 em background e SEMPRE dá início ao startLoop()
+  // para que a tensão da bateria continue sendo lida e o motor seja monitorado continuamente
   unawaited(() async {
     ref.read(connectingEcuProvider.notifier).state = true;
     try {
-      final manualProtocol = ref.read(manualEcuProtocolProvider);
-      final connectedProtocol = manualProtocol != null
-          ? ((await obd2Service.connectEcuViaProtocol(manualProtocol))
-              ? manualProtocol
-              : null)
-          : await obd2Service.connectEcuAutoDetect();
-      if (connectedProtocol != null) {
-        await obd2Service.startLoop();
-      }
+      await obd2Service.connectEcu();
     } catch (e) {
       ref.read(remoteLogServiceProvider).log(
-            LogLevel.warn,
-            'dashboard',
-            'Tentativa automática de conexão com a ECU: $e',
-          );
+        LogLevel.warn,
+        'dashboard',
+        'Tentativa automática de conexão com a ECU: $e',
+      );
     } finally {
       ref.read(connectingEcuProvider.notifier).state = false;
+      await obd2Service.startLoop();
     }
   }());
 

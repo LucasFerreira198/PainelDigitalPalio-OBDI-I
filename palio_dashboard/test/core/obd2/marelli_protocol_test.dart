@@ -79,6 +79,28 @@ void main() {
       expect(MarelliFormulas.rpm(result.dataBytes), 2000.0);
     });
 
+    test('parseia resposta de despertar KWP2000 Marelli 1A 97 (5A 97 com header)', () {
+      // 84 F1 10 5A 97 01 02 (CS: (0x84 + 0xF1 + 0x10 + 0x5A + 0x97 + 0x01 + 0x02) & 0xFF = 0x79)
+      final result = parseMarelliResponse('84 F1 10 5A 97 01 02 79\r\n>');
+
+      expect(result, isNotNull);
+      expect(result!.dataBytes, [0x01, 0x02]);
+    });
+
+    test('parseia resposta de despertar KWP2000 Marelli 1A 97 direta (5A 97)', () {
+      final result = parseMarelliResponse('5A 97 00 01\r\n>');
+
+      expect(result, isNotNull);
+      expect(result!.dataBytes, [0x00, 0x01]);
+    });
+
+    test('parseia resposta de bloco local Service 21 (61 01)', () {
+      final result = parseMarelliResponse('61 01 1F 40\r\n>');
+
+      expect(result, isNotNull);
+      expect(result!.dataBytes, [0x1F, 0x40]);
+    });
+
     test('retorna null para checksum inválido', () {
       final result = parseMarelliResponse('48 6B 10 61 01 1F 40 FF\r\n>');
       expect(result, isNull);

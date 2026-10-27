@@ -10,6 +10,7 @@ import '../../shared/settings/app_settings.dart';
 import '../../shared/settings/app_settings_provider.dart';
 import '../../shared/theme/app_theme.dart';
 import '../dashboard/dashboard_provider.dart';
+import '../diagnostics/test_obd_screen.dart';
 import 'settings_provider.dart';
 
 Future<void> _connectToDevice(
@@ -442,47 +443,80 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: 20),
 
           // -----------------------------------------------------------
-          // SEÇÃO 7: PROTOCOLO DA ECU
+          // SEÇÃO 7: PROTOCOLO DA ECU (BLOQUEADO E OTIMIZADO PARA PALIO FIRE)
           // -----------------------------------------------------------
-          _buildSectionHeader('Protocolo da ECU (Reverse Engineered Fiat)'),
+          _buildSectionHeader('Protocolo da ECU (Específico Fiat Palio Fire)'),
           Card(
             color: AppTheme.surface,
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 4,
-              ),
-              child: DropdownButtonFormField<EcuProtocol?>(
-                isExpanded: true,
-                initialValue: manualProtocol,
-                dropdownColor: AppTheme.surface,
-                decoration: const InputDecoration(border: InputBorder.none),
-                style: const TextStyle(color: Colors.white),
-                items: [
-                  const DropdownMenuItem<EcuProtocol?>(
-                    value: null,
-                    child: Text(
-                      'Automático (KWP2000 Fast Init Fiat primeiro)',
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.lock_outline, color: clusterTheme.accent, size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Protocolo Fixo do Palio Fire (AlfaOBD)',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'ECU: Marelli IAW 4AF/4EF/59F/5AF (4AF/4EF/59F/5AF EOBD)',
+                    style: TextStyle(
+                      color: clusterTheme.accent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
                     ),
                   ),
-                  ...Obd2Service.allProtocolsInOrder.map(
-                    (p) => DropdownMenuItem<EcuProtocol?>(
-                      value: p,
-                      child: Text(p.displayLabel),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '• Inicialização: ISO 14230-4 KWP2000 Fast Init (ATSP5, ATIB10, ATSH8110F1)',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '• Handshake de Despertar: 1A 97 (Resposta 5A 97)',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '• Velocidade da Linha K: 10400 bps (Pino 7)',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accent,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: const Icon(Icons.troubleshoot, size: 20),
+                      label: const Text(
+                        'ABRIR CENTRAL DE TESTE & DIAGNÓSTICO',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const TestObdScreen(),
+                        ),
+                      ),
                     ),
                   ),
                 ],
-                onChanged: (value) =>
-                    ref.read(manualEcuProtocolProvider.notifier).state =
-                        value,
               ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Text(
-              'A maioria dos Fiat Palio (G1 a G4) utiliza ISO 14230-4 KWP2000 Fast Init a 10400 bps na Linha K (Pino 7).',
-              style: TextStyle(color: Colors.white38, fontSize: 11),
             ),
           ),
           const SizedBox(height: 20),

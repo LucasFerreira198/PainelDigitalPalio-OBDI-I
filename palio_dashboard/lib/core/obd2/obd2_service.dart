@@ -68,7 +68,7 @@ class Obd2Service {
   /// [BtCommandTimeoutException] se o próprio chip não responder à
   /// configuração, indicando problema no adaptador/Bluetooth, não na ECU.
   Future<void> setupAdapter({
-    EcuProtocol protocol = EcuProtocol.iso9141,
+    EcuProtocol protocol = EcuProtocol.kwp2000FastInit,
   }) async {
     final setupSequence = switch (protocol) {
       EcuProtocol.obd2Standard => kElm327SetupObd2Standard,
@@ -82,46 +82,93 @@ class Obd2Service {
           : BtManager.defaultTimeout;
       await btManager.sendCommand(command, timeout: timeout);
     }
-    _last = _last.copyWith(btStatus: ConnectionStatus.connected);
+    _activeLayer = protocol;
+    _last = _last.copyWith(
+      btStatus: ConnectionStatus.connected,
+      ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000 Fast Init)',
+    );
   }
 
-  /// Valida se a ECU responde via protocolo Marelli KWP2000 / ISO9141.
-  /// Testa primeiro a rotação (RPM - PID 01 0C) com timeout ampliado para
-  /// permitir o pulso Fast Init na linha K. Se responder, a conexão com a ECU
-  /// é confirmada quase imediatamente. Em caso de falha, tenta temperatura
-  /// e comando 1A 97 como alternativas rápidas.
+  /// Valida se a ECU responde via protocolo Marelli KWP2000 (Fiat Palio IAW 4AF / 4EF / 59F / 5AF).
+  /// Envia primeiro o comando de despertar (wake-up) do AlfaOBD: '1A 97' (ReadEcuIdentification).
+  /// Se a ECU responder (contendo '5A' ou '97'), a sessão KWP2000 está aberta.
+  /// Em seguida testa leitura de RPM (01 0C) e temperatura (01 05).
   Future<bool> connectEcu({
     List<MarelliPid> pids = MarelliPid.ecuHandshakePids,
     Duration timeout = const Duration(seconds: 4),
   }) async {
-    // 1. Tenta RPM diretamente com timeout generoso para o pulso Fast Init
-    if (await _readPid(MarelliPid.rpm, timeout: const Duration(milliseconds: 3500))) {
-      _last = _last.copyWith(ecuResponding: true);
-      _dataController.add(_last);
-      return true;
-    }
+    _logSink?.call(
+      LogLevel.info,
+      'obd2',
+      'Despertando ECU Marelli IAW 4AF (Fast Init 1A 97)...',
+    );
 
-    // 2. Fallback: temperatura do motor (PID 01 05)
-    if (await _readPid(MarelliPid.coolantTemp, timeout: const Duration(seconds: 2))) {
-      _last = _last.copyWith(ecuResponding: true);
-      _dataController.add(_last);
-      return true;
-    }
-
-    // 3. Fallback: comando de identificação Marelli KWP2000 (1A 97)
+    // 1. Wake-up handshake oficial AlfaOBD para IAW 4AF: '1A 97'
     try {
-      final idRaw = await btManager.sendCommand('1A 97', timeout: const Duration(seconds: 2));
-      if (!isElmFailureResponse(idRaw)) {
-        _last = _last.copyWith(ecuResponding: true);
+      final idRaw = await btManager.sendCommand('1A 97', timeout: const Duration(milliseconds: 3500));
+      if (!isElmFailureResponse(idRaw) && (idRaw.contains('5A') || idRaw.contains('97'))) {
+        _logSink?.call(
+          LogLevel.info,
+          'obd2',
+          'ECU Marelli IAW 4AF despertada com sucesso (resposta 1A 97: $idRaw)',
+        );
+        // Após acordar, lê RPM e tensão para alimentar os mostradores
+        await _readPid(MarelliPid.batteryVoltage);
+        await _readPid(MarelliPid.rpm, timeout: const Duration(seconds: 2));
+        _last = _last.copyWith(
+          ecuResponding: true,
+          ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
+        );
+        _dataController.add(_last);
+        return true;
+      }
+    } catch (e) {
+      _logSink?.call(LogLevel.warn, 'obd2', 'Tentativa 1A 97: $e');
+    }
+
+    // 2. Teste direto de RPM (01 0C)
+    if (await _readPid(MarelliPid.rpm, timeout: const Duration(seconds: 2))) {
+      await _readPid(MarelliPid.batteryVoltage);
+      _last = _last.copyWith(
+        ecuResponding: true,
+        ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
+      );
+      _dataController.add(_last);
+      return true;
+    }
+
+    // 3. Fallback: temperatura do motor (01 05)
+    if (await _readPid(MarelliPid.coolantTemp, timeout: const Duration(seconds: 2))) {
+      await _readPid(MarelliPid.batteryVoltage);
+      _last = _last.copyWith(
+        ecuResponding: true,
+        ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
+      );
+      _dataController.add(_last);
+      return true;
+    }
+
+    // 4. Fallback: comando Marelli Service 21 (21 01)
+    try {
+      final locRaw = await btManager.sendCommand('21 01', timeout: const Duration(seconds: 2));
+      if (!isElmFailureResponse(locRaw) && (locRaw.contains('61') || locRaw.contains('01'))) {
+        await _readPid(MarelliPid.batteryVoltage);
+        _last = _last.copyWith(
+          ecuResponding: true,
+          ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
+        );
         _dataController.add(_last);
         return true;
       }
     } catch (_) {}
 
+    // Sempre tenta ler a bateria mesmo que a ECU não responda
+    await _readPid(MarelliPid.batteryVoltage);
+
     _logSink?.call(
       LogLevel.warn,
       'obd2',
-      'ECU Marelli não respondeu aos comandos de handshake rápido',
+      'ECU Marelli não respondeu aos comandos de despertar (ignição pode estar desligada)',
     );
     _last = _last.copyWith(ecuResponding: false);
     _dataController.add(_last);
@@ -276,21 +323,44 @@ class Obd2Service {
   }
 
   /// Inicia o loop contínuo de leitura dos PIDs da camada de protocolo
-  /// ativa ([activeProtocol], definida por uma conexão bem-sucedida via
-  /// [connectEcu]/[connectStandardObd2]/[connectEcuAutoDetect]). Cada ciclo
-  /// lê todos os PIDs em sequência e emite um snapshot consolidado de
-  /// [OBDDataModel]. Chamar quando já está rodando não tem efeito (evita
-  /// loops duplicados).
+  /// ativa ([activeProtocol]). Cada ciclo lê os PIDs em sequência e emite
+  /// um snapshot consolidado de [OBDDataModel].
+  /// Lê a tensão da bateria [ATRV] continuamente para garantir que o painel
+  /// mostre a voltagem da bateria mesmo com o motor desligado.
   Future<void> startLoop({
     Duration cycleDelay = const Duration(milliseconds: 50),
   }) async {
     if (_running) return;
     _running = true;
+    var loopCounter = 0;
     while (_running) {
+      loopCounter++;
+
+      // Sempre lê a bateria a cada ~1.5s (ou a cada 2 ciclos se a ECU estiver desligada)
+      final shouldReadBattery = !_last.ecuResponding || (loopCounter % 8 == 0);
+      if (shouldReadBattery) {
+        await _readPid(MarelliPid.batteryVoltage);
+      }
+
+      // Se a ECU não está respondendo, tenta o despertar AlfaOBD (1A 97) a cada 8 ciclos
+      if (!_last.ecuResponding && (loopCounter % 8 == 0)) {
+        try {
+          final idRaw = await btManager.sendCommand('1A 97', timeout: const Duration(seconds: 2));
+          if (!isElmFailureResponse(idRaw) && (idRaw.contains('5A') || idRaw.contains('97'))) {
+            _last = _last.copyWith(ecuResponding: true);
+            _dataController.add(_last);
+          }
+        } catch (_) {}
+      }
+
       final anyPidSucceeded = _activeLayer == EcuProtocol.obd2Standard
           ? await _runStandardCycle(StandardObd2Pid.dashboardLoop)
           : await _runMarelliCycle(MarelliPid.dashboardLoop);
-      _last = _last.copyWith(ecuResponding: anyPidSucceeded);
+
+      _last = _last.copyWith(
+        ecuResponding: anyPidSucceeded,
+        ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
+      );
       _dataController.add(_last);
       await Future.delayed(cycleDelay);
     }
@@ -301,13 +371,18 @@ class Obd2Service {
     btManager.clearQueue();
   }
 
-  /// Lê todos os [pids] Marelli uma vez; retorna true se algum respondeu.
+  /// Lê todos os [pids] Marelli uma vez; retorna true se algum sensor da ECU respondeu.
+  /// NÃO considera [batteryVoltage] como resposta da ECU, pois ATRV responde
+  /// do próprio ELM327 com motor/ECU desligada.
   Future<bool> _runMarelliCycle(List<MarelliPid> pids) async {
-    var anySucceeded = false;
+    var anyEcuPidSucceeded = false;
     for (final pid in pids) {
-      if (await _readPid(pid)) anySucceeded = true;
+      final ok = await _readPid(pid);
+      if (ok && pid != MarelliPid.batteryVoltage) {
+        anyEcuPidSucceeded = true;
+      }
     }
-    return anySucceeded;
+    return anyEcuPidSucceeded;
   }
 
   /// Lê todos os [pids] OBD-II padrão uma vez; retorna true se algum

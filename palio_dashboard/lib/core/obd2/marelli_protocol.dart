@@ -65,12 +65,12 @@ const List<String> kElm327SetupKwp2000SlowInit = [
   'ATST96',
 ];
 
-/// Sequência de inicialização para o Palio Fire (Marelli IAW 4AF / 4SF / 59F / 4GF)
-/// extraída do AlfaOBD:
+/// Sequência de inicialização para o Palio Fire (Marelli IAW 4AF / 4EF / 59F / 5AF)
+/// extraída do AlfaOBD (opção "Marelli IAW 4AF/4EF/59F/5AF EOBD"):
 /// - ATSP5: Fast Init ISO 14230-4 KWP
 /// - ATIB10: Baudrate 10400 bps (crítico para handshake Marelli)
-/// - ATH1: Headers ativados para validação de origem da ECU
-/// - ATSH8210F1: Header KWP físico (82 = formato físico 2 bytes de dados, 10 = ECU Motor, F1 = Scanner)
+/// - ATH1: Headers ativados para validação de origem da ECU (10 = Marelli)
+/// - ATSH8110F1: Header KWP físico (81 = formato físico 1 byte, 10 = ECU Motor, F1 = Scanner)
 const List<String> kElm327SetupKwp2000FastInit = [
   'ATZ',
   'ATE0',
@@ -79,8 +79,8 @@ const List<String> kElm327SetupKwp2000FastInit = [
   'ATAT0',
   'ATSP5',
   'ATIB10',
-  'ATH0',
-  'ATSH8210F1',
+  'ATH1',
+  'ATSH8110F1',
   'ATST96',
 ];
 
@@ -159,10 +159,10 @@ MarelliParseResult? parseMarelliResponse(String raw) {
   }
   if (bytes.isEmpty) return null;
 
-  // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 (Formato: [8X] [F1] [10] [41/61] [PID] ... [CS])
+  // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 (Formato: [8X] [F1] [10] [41/5A/61] [PID/Sub] ... [CS])
   if (bytes.length >= 6 && bytes[1] == 0xF1 && bytes[2] == 0x10) {
     final sResp = bytes[3];
-    if (sResp == 0x41 || sResp == 0x61) {
+    if (sResp == 0x41 || sResp == 0x61 || sResp == 0x5A) {
       final checksum = bytes.last;
       final computed = bytes
               .sublist(0, bytes.length - 1)
@@ -173,6 +173,7 @@ MarelliParseResult? parseMarelliResponse(String raw) {
         if (dataBytes.isNotEmpty) {
           return MarelliParseResult(dataBytes);
         }
+        return MarelliParseResult([bytes[4]]);
       }
       // Se não bateu checksum, verifica se o clone não emitiu checksum
       // (isto é, total de bytes após cabeçalho de 3 bytes é exatamente igual ao comprimento no byte 0)
@@ -182,6 +183,7 @@ MarelliParseResult? parseMarelliResponse(String raw) {
         if (dataBytes.isNotEmpty) {
           return MarelliParseResult(dataBytes);
         }
+        return MarelliParseResult([bytes[4]]);
       }
     }
     return null;
@@ -206,20 +208,21 @@ MarelliParseResult? parseMarelliResponse(String raw) {
     return null;
   }
 
-  // 3. Resposta com cabeçalho de 3 bytes para ECU Marelli (xx xx 10 41/61...), mas header desconhecido
+  // 3. Resposta com cabeçalho de 3 bytes para ECU Marelli (xx xx 10 41/5A/61...), mas header desconhecido
   if (bytes.length >= 5 &&
       bytes[2] == 0x10 &&
-      (bytes[3] == 0x41 || bytes[3] == 0x61)) {
+      (bytes[3] == 0x41 || bytes[3] == 0x61 || bytes[3] == 0x5A)) {
     return null;
   }
 
-  // 4. Resposta padrão OBD2 sem cabeçalhos (inicia diretamente ou após eco com 41 ou 61: 41 <PID> <DADOS...>)
-  for (var i = 0; i <= bytes.length - 3; i++) {
-    if (bytes[i] == 0x41 || bytes[i] == 0x61) {
+  // 4. Resposta padrão OBD2 sem cabeçalhos (inicia diretamente ou após eco com 41, 5A ou 61: 41 <PID> <DADOS...>)
+  for (var i = 0; i <= bytes.length - 2; i++) {
+    if (bytes[i] == 0x41 || bytes[i] == 0x61 || bytes[i] == 0x5A) {
       final dataBytes = bytes.sublist(i + 2);
       if (dataBytes.isNotEmpty) {
         return MarelliParseResult(dataBytes);
       }
+      return MarelliParseResult([bytes[i + 1]]);
     }
   }
 
