@@ -1,11 +1,11 @@
 import 'marelli_protocol.dart';
 
-/// PIDs do modo diagnóstico proprietário Fiat/Marelli — NÃO são PIDs OBD-II
-/// padrão (modo $01). Headers/checksums abaixo são aproximações baseadas em
-/// ISO 9141-2 com endereçamento Fiat e PRECISAM ser validados no carro real.
+/// PIDs de monitoramento para o Fiat Palio (Marelli IAW 4AF / 4SF / 59F / 4GF).
+/// Com o ELM327 configurado via ATSH 81 10 F1 (padrão AlfaOBD), o adaptador
+/// empacota o header KWP2000 e calcula o checksum automaticamente.
 enum MarelliPid {
   rpm(
-    command: '68 6A F1 21 01 C0',
+    command: '01 0C',
     label: 'RPM',
     unit: 'rpm',
     min: 0,
@@ -13,7 +13,7 @@ enum MarelliPid {
     formula: MarelliFormulas.rpm,
   ),
   speed(
-    command: '68 6A F1 21 02 C1',
+    command: '01 0D',
     label: 'Velocidade',
     unit: 'km/h',
     min: 0,
@@ -21,7 +21,7 @@ enum MarelliPid {
     formula: MarelliFormulas.speed,
   ),
   coolantTemp(
-    command: '68 6A F1 21 05 C4',
+    command: '01 05',
     label: 'Temp. motor',
     unit: '°C',
     min: -40,
@@ -29,7 +29,7 @@ enum MarelliPid {
     formula: MarelliFormulas.temp,
   ),
   intakeTemp(
-    command: '68 6A F1 21 0F CE',
+    command: '01 0F',
     label: 'Temp. admissão',
     unit: '°C',
     min: -40,
@@ -37,7 +37,7 @@ enum MarelliPid {
     formula: MarelliFormulas.temp,
   ),
   map(
-    command: '68 6A F1 21 0B CA',
+    command: '01 0B',
     label: 'MAP',
     unit: 'kPa',
     min: 0,
@@ -45,7 +45,7 @@ enum MarelliPid {
     formula: MarelliFormulas.map,
   ),
   tps(
-    command: '68 6A F1 21 11 D0',
+    command: '01 11',
     label: 'TPS',
     unit: '%',
     min: 0,
@@ -53,7 +53,7 @@ enum MarelliPid {
     formula: MarelliFormulas.tps,
   ),
   lambda(
-    command: '68 6A F1 21 24 E3',
+    command: '01 14',
     label: 'Lambda',
     unit: 'λ',
     min: 0,
@@ -61,7 +61,7 @@ enum MarelliPid {
     formula: MarelliFormulas.lambda,
   ),
   injectionTime(
-    command: '68 6A F1 21 66 A5',
+    command: '21 01', // Local ID 01 Marelli
     label: 'Injeção',
     unit: 'ms',
     min: 0,
@@ -69,7 +69,7 @@ enum MarelliPid {
     formula: MarelliFormulas.injection,
   ),
   ignitionAdvance(
-    command: '68 6A F1 21 0E CD',
+    command: '01 0E',
     label: 'Avanço ignição',
     unit: '°',
     min: -64,
@@ -77,7 +77,7 @@ enum MarelliPid {
     formula: MarelliFormulas.ignition,
   ),
   batteryVoltage(
-    command: '68 6A F1 21 42 01',
+    command: 'ATRV',
     label: 'Bateria',
     unit: 'V',
     min: 0,
@@ -102,5 +102,10 @@ enum MarelliPid {
   final double Function(List<int> bytes) formula;
 
   /// PIDs lidos no loop principal do dashboard (Fase 2).
-  static const List<MarelliPid> dashboardLoop = [rpm, speed, coolantTemp];
+  static const List<MarelliPid> dashboardLoop = [
+    rpm,
+    speed,
+    coolantTemp,
+    batteryVoltage,
+  ];
 }

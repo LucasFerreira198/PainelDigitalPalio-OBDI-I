@@ -3,7 +3,24 @@ import 'package:palio_dashboard/core/obd2/marelli_protocol.dart';
 
 void main() {
   group('parseMarelliResponse', () {
-    test('parseia resposta válida e extrai bytes de dados', () {
+    test('parseia resposta KWP2000 Fiat com header 84 F1 10 41 0C', () {
+      // 84 F1 10 41 0C 1F 40 (dados 1F 40 = 2000 RPM)
+      // Checksum: (0x84 + 0xF1 + 0x10 + 0x41 + 0x0C + 0x1F + 0x40) & 0xFF = 0x31
+      final result = parseMarelliResponse('84 F1 10 41 0C 1F 40 31\r\n>');
+
+      expect(result, isNotNull);
+      expect(result!.dataBytes, [0x1F, 0x40]);
+      expect(MarelliFormulas.rpm(result.dataBytes), 2000.0);
+    });
+
+    test('parseia resposta de tensao direta do ATRV', () {
+      final result = parseMarelliResponse('12.6V\r\n>');
+
+      expect(result, isNotNull);
+      expect(MarelliFormulas.voltage(result!.dataBytes), closeTo(12.6, 0.1));
+    });
+
+    test('parseia resposta valida e extrai bytes de dados (legado)', () {
       // header 48 6B 10, modo+pid 61 01, dados 1F 40, checksum 84
       final result = parseMarelliResponse('48 6B 10 61 01 1F 40 84\r\n>');
 

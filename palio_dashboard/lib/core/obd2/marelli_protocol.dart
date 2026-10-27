@@ -26,21 +26,24 @@ class MarelliFormulas {
 }
 
 /// Comandos AT que configuram apenas o chip ELM327 em si — não dependem da
-/// ECU do carro estar ligada/respondendo. Se algum desses falhar, o problema
-/// é no adaptador/Bluetooth, não na ECU.
+/// ECU do carro estar ligada/respondendo. Baseados na sequência exata
+/// extraída via engenharia reversa do AlfaOBD para veículos Fiat Palio.
 ///
-/// Números de protocolo do ELM327 (datasheet oficial — uma versão anterior
-/// deste arquivo usava ATSP4 rotulado como "ISO9141-2", o que está errado):
-///   ATSP3 = ISO 9141-2 (5-baud init)         ← nunca tentado até agora
+/// Números de protocolo do ELM327:
+///   ATSP3 = ISO 9141-2 (5-baud init)
 ///   ATSP4 = ISO 14230-4 KWP2000 (5-baud init)
-///   ATSP5 = ISO 14230-4 KWP2000 (fast init)
+///   ATSP5 = ISO 14230-4 KWP2000 (fast init) — protocolo nativo do Palio Fire!
 const List<String> kElm327SetupIso9141 = [
   'ATZ',
   'ATE0',
   'ATL0',
-  'ATH1',
+  'ATS0',
+  'ATAT0',
   'ATSP3',
-  'ATAT2',
+  'ATIB48',
+  'ATH1',
+  'ATSH8110F1',
+  'ATIIA10',
   'ATST96',
 ];
 
@@ -48,19 +51,32 @@ const List<String> kElm327SetupKwp2000SlowInit = [
   'ATZ',
   'ATE0',
   'ATL0',
-  'ATH1',
+  'ATS0',
+  'ATAT0',
   'ATSP4',
-  'ATAT2',
+  'ATIB10',
+  'ATH1',
+  'ATSH8110F1',
+  'ATIIA10',
   'ATST96',
 ];
 
+/// Sequência de inicialização para o Palio Fire (Marelli IAW 4AF / 4SF / 59F / 4GF)
+/// extraída do AlfaOBD:
+/// - ATSP5: Fast Init ISO 14230-4 KWP
+/// - ATIB10: Baudrate 10400 bps (crítico para handshake Marelli)
+/// - ATH1: Headers ativados para validação de origem da ECU
+/// - ATSH8110F1: Header KWP físico (81 = tamanho 1 byte, 10 = ECU Motor, F1 = Scanner)
 const List<String> kElm327SetupKwp2000FastInit = [
   'ATZ',
   'ATE0',
   'ATL0',
-  'ATH1',
+  'ATS0',
+  'ATAT0',
   'ATSP5',
-  'ATAT2',
+  'ATIB10',
+  'ATH1',
+  'ATSH8110F1',
   'ATST96',
 ];
 
@@ -81,54 +97,98 @@ bool isElmFailureResponse(String raw) {
       upper.contains('?');
 }
 
-/// Resultado do parsing de uma resposta ISO 9141-2 do ELM327.
+/// Resultado do parsing de uma resposta da ECU (KWP2000 ou ISO 9141) do ELM327.
 class MarelliParseResult {
   final List<int> dataBytes;
 
   const MarelliParseResult(this.dataBytes);
 }
 
-/// Parseia uma resposta típica do ELM327 para um comando Marelli:
-/// "48 6B 10 61 01 XX XX CS\r\n>"
-///   48 6B 10 = header (source=ECU, dest=tester, modo)
-///   61 01    = resposta positiva ao modo+PID
-///   XX XX    = bytes de dados
-///   CS       = checksum (soma de todos os bytes anteriores, mod 256)
-///
-/// Retorna null se a resposta for inválida (timeout, "NO DATA", "ERROR",
-/// header incorreto ou checksum inválido).
+/// Parseia a resposta do ELM327 para leituras do Fiat Palio:
+/// Suporta os 3 formatos retornados por adaptadores em veículos Fiat:
+/// 1. Resposta KWP2000 física Fiat (AlfaOBD):
+///    "8X F1 10 41/61 <PID> <DADOS...> <CS>\r\n>"
+///    8X = Formato (0x80 + comprimento), F1 = Destino (Scanner), 10 = Origem (ECU Marelli)
+/// 2. Resposta legada ISO 9141 funcional:
+///    "48 6B 10 41/61 <PID> <DADOS...> <CS>\r\n>"
+/// 3. Resposta direta do comando ATRV para tensão de bateria:
+///    "12.6V\r\n>"
+/// 4. Resposta sem cabeçalho (se o adaptador omitir headers):
+///    "41/61 <PID> <DADOS...>\r\n>"
 MarelliParseResult? parseMarelliResponse(String raw) {
   final cleaned = raw.replaceAll('>', '').trim();
   if (cleaned.isEmpty) return null;
-
   if (isElmFailureResponse(cleaned)) return null;
+
+  // Caso especial: leitura de tensão direta da bateria via comando ATRV (ex: "12.8V")
+  final vMatch = RegExp(r'(\d+\.?\d*)\s*V', caseSensitive: false).firstMatch(cleaned);
+  if (vMatch != null && !cleaned.contains('41') && !cleaned.contains('61')) {
+    final vVal = double.tryParse(vMatch.group(1)!);
+    if (vVal != null) {
+      return MarelliParseResult([(vVal * 10).round()]);
+    }
+  }
 
   final tokens = cleaned.toUpperCase()
       .split(RegExp(r'[\s\r\n]+'))
       .where((t) => t.isNotEmpty)
       .toList();
-  if (tokens.length < 6) return null;
+  if (tokens.isEmpty) return null;
 
   final bytes = <int>[];
   for (final token in tokens) {
     final value = int.tryParse(token, radix: 16);
-    if (value == null || value < 0 || value > 0xFF) return null;
-    bytes.add(value);
+    if (value != null && value >= 0 && value <= 0xFF) {
+      bytes.add(value);
+    }
+  }
+  if (bytes.isEmpty) return null;
+
+  // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 (Formato: [8X] [F1] [10] [41/61] [PID] ... [CS])
+  for (var i = 0; i <= bytes.length - 5; i++) {
+    if (bytes[i + 1] == 0xF1 && bytes[i + 2] == 0x10) {
+      final sResp = bytes[i + 3];
+      if (sResp == 0x41 || sResp == 0x61) {
+        // Valida checksum se o pacote estiver completo
+        final checksum = bytes.last;
+        final computed = bytes
+                .sublist(i, bytes.length - 1)
+                .fold<int>(0, (sum, b) => sum + b) &
+            0xFF;
+        if (computed == checksum || bytes.length >= 6) {
+          final dataBytes = bytes.sublist(i + 5, bytes.length - 1);
+          if (dataBytes.isNotEmpty) {
+            return MarelliParseResult(dataBytes);
+          }
+        }
+      }
+    }
   }
 
-  // Header de resposta esperado: 48 6B ..
-  if (bytes[0] != 0x48 || bytes[1] != 0x6B) return null;
+  // 2. Resposta legada ISO 9141 funcional (48 6B 10 ...)
+  if (bytes.length >= 6 && bytes[0] == 0x48 && bytes[1] == 0x6B) {
+    final checksum = bytes.last;
+    final computed = bytes
+            .sublist(0, bytes.length - 1)
+            .fold<int>(0, (sum, b) => sum + b) &
+        0xFF;
+    if (computed == checksum) {
+      final dataBytes = bytes.sublist(5, bytes.length - 1);
+      if (dataBytes.isNotEmpty) {
+        return MarelliParseResult(dataBytes);
+      }
+    }
+  }
 
-  final checksum = bytes.last;
-  final computed = bytes
-          .sublist(0, bytes.length - 1)
-          .fold<int>(0, (sum, b) => sum + b) &
-      0xFF;
-  if (computed != checksum) return null;
+  // 3. Resposta sem cabeçalhos (41/61 <PID> <DADOS...>)
+  for (var i = 0; i < bytes.length - 2; i++) {
+    if (bytes[i] == 0x41 || bytes[i] == 0x61) {
+      final dataBytes = bytes.sublist(i + 2);
+      if (dataBytes.isNotEmpty) {
+        return MarelliParseResult(dataBytes);
+      }
+    }
+  }
 
-  // bytes: [header(3), modo+pid resposta(2), dados..., checksum]
-  final dataBytes = bytes.sublist(5, bytes.length - 1);
-  if (dataBytes.isEmpty) return null;
-
-  return MarelliParseResult(dataBytes);
+  return null;
 }

@@ -1,7 +1,7 @@
 name: palio_dashboard
 description: OBD2 dashboard para Fiat Palio Fire Economy — Marelli IAW
 publish_to: 'none'
-version: 1.0.13+14
+version: 1.0.14+15
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

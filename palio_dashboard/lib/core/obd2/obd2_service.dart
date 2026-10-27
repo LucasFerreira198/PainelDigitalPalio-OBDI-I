@@ -91,6 +91,11 @@ class Obd2Service {
     List<MarelliPid> pids = MarelliPid.dashboardLoop,
     Duration timeout = const Duration(seconds: 10),
   }) async {
+    // Handshake KWP2000 Fast Init com a ECU do Palio (dispara o pulso do ELM327)
+    try {
+      await btManager.sendCommand('01 00', timeout: const Duration(seconds: 2));
+    } catch (_) {}
+
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       if (await _runMarelliCycle(pids)) {
@@ -138,8 +143,8 @@ class Obd2Service {
   /// Todas as camadas de protocolo conhecidas, na ordem usada por
   /// [connectEcuAutoDetect] quando não há nenhuma lembrada/preferida.
   static const List<EcuProtocol> allProtocolsInOrder = [
-    EcuProtocol.obd2Standard,
     EcuProtocol.kwp2000FastInit,
+    EcuProtocol.obd2Standard,
     EcuProtocol.kwp2000SlowInit,
     EcuProtocol.iso9141,
   ];
