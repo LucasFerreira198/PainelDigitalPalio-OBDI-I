@@ -647,11 +647,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
                               label: Text(
                                 p == EcuProtocol.kwp2000FastInit
                                     ? 'Palio Fire (KWP2000 Fast)'
-                                    : (p == EcuProtocol.obd2Auto
-                                        ? 'OBD-II Auto'
-                                        : (p == EcuProtocol.kwp2000SlowInit
-                                            ? 'KWP Slow'
-                                            : 'ISO 9141-2')),
+                                    : p.displayLabel,
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight:
