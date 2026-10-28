@@ -62,9 +62,9 @@ class SpeedGauge extends StatelessWidget {
               needleLength: 0.8,
               needleStartWidth: 1,
               needleEndWidth: 4,
-              animationType: AnimationType.ease,
+              animationType: AnimationType.linear,
               enableAnimation: true,
-              animationDuration: 120,
+              animationDuration: 80,
             ),
           ],
           annotations: [

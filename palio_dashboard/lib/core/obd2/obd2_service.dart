@@ -53,6 +53,7 @@ class Obd2Service {
 
   bool _running = false;
   int _loopSessionId = 0;
+  int _speedFailCount = 0;
 
   EcuProtocol? _activeLayer;
   Future<EcuProtocol?>? _activeConnection;
@@ -379,7 +380,7 @@ class Obd2Service {
   /// consultado a cada ciclo (~50ms) com prioridade máxima, enquanto os demais
   /// sensores de menor variação dinâmica (temperatura, bateria, MAP) são escalonados.
   Future<void> startLoop({
-    Duration cycleDelay = const Duration(milliseconds: 30),
+    Duration cycleDelay = const Duration(milliseconds: 10),
   }) async {
     if (_running) return;
     _running = true;
@@ -388,11 +389,14 @@ class Obd2Service {
     while (_running && _loopSessionId == sessionId) {
       loopCounter++;
 
-      // Sempre lê a bateria a cada ~2s (ou a cada 2 ciclos se a ECU estiver desligada)
-      final shouldReadBattery = !_last.ecuResponding || (loopCounter % 15 == 0);
+      // Lê a bateria a cada ~3s (60 ciclos) se a ECU estiver respondendo,
+      // ou a cada 5 ciclos se a ECU estiver desligada.
+      final shouldReadBattery = !_last.ecuResponding
+          ? (loopCounter % 5 == 0)
+          : (loopCounter % 60 == 0);
       if (shouldReadBattery) {
-        await _readPid(MarelliPid.batteryVoltage, timeout: const Duration(milliseconds: 600));
-        await Future.delayed(const Duration(milliseconds: 25));
+        await _readPid(MarelliPid.batteryVoltage, timeout: const Duration(milliseconds: 500));
+        await Future.delayed(const Duration(milliseconds: 15));
       }
 
       // Se a ECU não está respondendo, tenta o despertar AlfaOBD (1A 97) a cada 10 ciclos
@@ -404,7 +408,7 @@ class Obd2Service {
             _dataController.add(_last);
           }
         } catch (_) {}
-        await Future.delayed(const Duration(milliseconds: 25));
+        await Future.delayed(const Duration(milliseconds: 15));
       }
 
       if (!_running || _loopSessionId != sessionId) break;
@@ -430,40 +434,54 @@ class Obd2Service {
     btManager.clearQueue();
   }
 
-  /// Ciclo adaptativo de alta performance para Palio Fire:
-  /// - RPM (21 30) lido a cada ciclo com prioridade máxima;
-  /// - Sensores secundários (MAP 21 31, TPS 21 34, Temperatura 21 33) rotacionados
-  ///   1 a cada ciclo, respeitando o tempo de recuperação P3 (30ms) da linha K;
-  /// - Velocidade (21 53) consultada a cada 15 ciclos com timeout seguro.
+  /// Ciclo de telemetria ultra-rápido para Palio Fire (20 a 25 Hz para RPM):
+  /// - RPM (21 30) é consultado em TODOS os ciclos com prioridade máxima;
+  /// - Sensores secundários (MAP 21 31, TPS 21 34, Temperatura 21 33) são consultados
+  ///   em taxa reduzida (1 a cada 4 ciclos), garantindo que 75% dos ciclos sejam dedicados
+  ///   exclusivamente ao tacômetro para resposta instantânea ao acelerador;
+  /// - Velocidade (21 53) possui backoff automático para não causar lag quando parado.
   Future<bool> _runMarelliAdaptiveCycle(int loopCounter) async {
     var anyEcuPidSucceeded = false;
-    const pidTimeout = Duration(milliseconds: 1000);
-    const p3Delay = Duration(milliseconds: 30);
+    const pidTimeout = Duration(milliseconds: 600);
+    const p3Delay = Duration(milliseconds: 15);
 
-    // 1. RPM (Prioridade máxima: lido em absolutamente todos os ciclos)
+    // 1. RPM (Prioridade absoluta: executado em absolutamente todos os ciclos)
     final rpmOk = await _readPid(MarelliPid.rpm, timeout: pidTimeout);
     if (rpmOk) anyEcuPidSucceeded = true;
 
-    await Future.delayed(p3Delay);
-
-    // 2. Rotaciona um sensor secundário por ciclo para evitar colisões na linha K
-    final secondarySlot = loopCounter % 3;
-    if (secondarySlot == 0) {
-      final mapOk = await _readPid(MarelliPid.map, timeout: pidTimeout);
-      if (mapOk) anyEcuPidSucceeded = true;
-    } else if (secondarySlot == 1) {
-      final tpsOk = await _readPid(MarelliPid.tps, timeout: pidTimeout);
-      if (tpsOk) anyEcuPidSucceeded = true;
-    } else {
-      final tempOk = await _readPid(MarelliPid.coolantTemp, timeout: pidTimeout);
-      if (tempOk) anyEcuPidSucceeded = true;
+    // 2. Consulta de sensor secundário: executada apenas a cada 4 ciclos (proporção 3:1 RPM)
+    // Isso garante que o RPM seja atualizado sem interrupções constantes.
+    if (loopCounter % 4 == 0) {
+      await Future.delayed(p3Delay);
+      final secondarySlot = (loopCounter ~/ 4) % 3;
+      if (secondarySlot == 0) {
+        final mapOk = await _readPid(MarelliPid.map, timeout: pidTimeout);
+        if (mapOk) anyEcuPidSucceeded = true;
+      } else if (secondarySlot == 1) {
+        final tpsOk = await _readPid(MarelliPid.tps, timeout: pidTimeout);
+        if (tpsOk) anyEcuPidSucceeded = true;
+      } else {
+        final tempOk = await _readPid(MarelliPid.coolantTemp, timeout: pidTimeout);
+        if (tempOk) anyEcuPidSucceeded = true;
+      }
     }
 
-    // 3. Velocidade do veículo (21 53): consultada a cada 15 ciclos
-    if (loopCounter % 15 == 0) {
+    // 3. Velocidade do veículo (21 53):
+    // Quando o carro está parado ou a ECU não responde a 21 53, aplicamos backoff
+    // para evitar travamentos ou atrasos no acelerador.
+    final shouldQuerySpeed = _speedFailCount >= 3
+        ? (loopCounter % 90 == 0)
+        : (loopCounter % 20 == 0);
+
+    if (shouldQuerySpeed) {
       await Future.delayed(p3Delay);
-      final spdOk = await _readPid(MarelliPid.speed, timeout: const Duration(milliseconds: 700));
-      if (spdOk) anyEcuPidSucceeded = true;
+      final spdOk = await _readPid(MarelliPid.speed, timeout: const Duration(milliseconds: 250));
+      if (spdOk) {
+        anyEcuPidSucceeded = true;
+        _speedFailCount = 0;
+      } else {
+        _speedFailCount++;
+      }
     }
 
     return anyEcuPidSucceeded;
@@ -501,7 +519,7 @@ class Obd2Service {
     try {
       final raw = await btManager.sendCommand(
         pid.command,
-        timeout: timeout ?? const Duration(milliseconds: 1000),
+        timeout: timeout ?? const Duration(milliseconds: 600),
       );
       final parsed = parseMarelliResponse(raw);
       if (parsed == null) {
