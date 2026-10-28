@@ -519,7 +519,7 @@ class Obd2Service {
       final value = pid.formula(parsed.dataBytes);
       _last = _applyPidValue(pid, value).copyWith(
         ecuResponding: pid != MarelliPid.batteryVoltage ? true : _last.ecuResponding,
-        ecuProtocolLabel: _last.ecuProtocolLabel.isEmpty ? 'IAW 4AF EOBD (KWP2000)' : _last.ecuProtocolLabel,
+        ecuProtocolLabel: _last.ecuProtocolLabel ?? 'IAW 4AF EOBD (KWP2000)',
       );
       _dataController.add(_last);
       return true;
