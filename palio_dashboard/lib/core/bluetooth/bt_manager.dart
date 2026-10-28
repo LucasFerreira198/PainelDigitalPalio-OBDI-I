@@ -228,7 +228,12 @@ class BtManager {
           raw: next.command,
         );
         next.completer.completeError(BtCommandTimeoutException(next.command));
-        _pumpQueue();
+        // Descarta bytes residuais e dá 60ms para a linha serial estabilizar
+        _buffer.clear();
+        Future.delayed(const Duration(milliseconds: 60), () {
+          _buffer.clear();
+          _pumpQueue();
+        });
       }
     });
   }
@@ -243,10 +248,16 @@ class BtManager {
     _inFlight = null;
     _buffer.clear();
 
+    if (current == null) {
+      // Resposta residual atrasada (ex: STOPPED de comando abortado) - descarta
+      _pumpQueue();
+      return;
+    }
+
     final cleanedResponse = text.replaceAll('\r', ' ').replaceAll('\n', ' ').trim();
     logTraffic(BtTrafficType.rx, cleanedResponse);
 
-    current?.completer.complete(text);
+    current.completer.complete(text);
     _pumpQueue();
   }
 

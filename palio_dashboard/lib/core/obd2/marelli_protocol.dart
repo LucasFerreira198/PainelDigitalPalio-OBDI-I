@@ -165,7 +165,7 @@ const List<String> kElm327SetupKwp2000FastInit = [
   'ATIB10',
   'ATH1',
   'ATSH8210F1',
-  'ATST96',
+  'ATST64',
 ];
 
 /// ATZ reinicia o microcontrolador do ELM327 — no hardware real isso demora
