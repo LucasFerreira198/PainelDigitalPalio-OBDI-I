@@ -97,8 +97,11 @@ Stream<OBDDataModel> _liveObdStream(Ref ref) async* {
     if (!btManager.isConnected) {
       await btManager.connect(lastAddress);
     }
-    // Protocolo fixo Palio Fire: Marelli IAW 4AF EOBD (KWP2000 Fast Init @ 10400 bps)
-    await obd2Service.setupAdapter(protocol: EcuProtocol.kwp2000FastInit);
+    // Protocolo configurado: manual, último lembrado ou KWP2000 Fast Init (Palio Fire)
+    final manualProto = ref.read(manualEcuProtocolProvider);
+    final remembered = await obd2Service.loadRememberedProtocol();
+    final chosenProtocol = manualProto ?? remembered ?? EcuProtocol.kwp2000FastInit;
+    await obd2Service.setupAdapter(protocol: chosenProtocol);
   } catch (e) {
     ref.read(remoteLogServiceProvider).log(
       LogLevel.error,

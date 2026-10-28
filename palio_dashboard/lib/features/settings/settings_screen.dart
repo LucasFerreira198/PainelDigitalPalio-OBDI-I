@@ -455,10 +455,10 @@ class SettingsScreen extends ConsumerWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.lock_outline, color: clusterTheme.accent, size: 20),
+                      Icon(Icons.tune, color: clusterTheme.accent, size: 20),
                       const SizedBox(width: 8),
                       const Text(
-                        'Protocolo Fixo do Palio Fire (AlfaOBD)',
+                        'Configuração de Protocolo ECU',
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -469,7 +469,7 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'ECU: Marelli IAW 4AF/4EF/59F/5AF (4AF/4EF/59F/5AF EOBD)',
+                    'ECU Alvo: Marelli IAW 4AF/4EF/59F/5AF EOBD (Palio Fire Economy 2010)',
                     style: TextStyle(
                       color: clusterTheme.accent,
                       fontWeight: FontWeight.bold,
@@ -478,7 +478,7 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    '• Inicialização: ISO 14230-4 KWP2000 Fast Init (ATSP5, ATIB10, ATSH8110F1)',
+                    '• Inicialização: ISO 14230-4 KWP2000 Fast Init (ATSP5, ATIB10, ATSH8210F1)',
                     style: TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   const SizedBox(height: 4),
@@ -490,6 +490,53 @@ class SettingsScreen extends ConsumerWidget {
                   const Text(
                     '• Velocidade da Linha K: 10400 bps (Pino 7)',
                     style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<EcuProtocol>(
+                    isExpanded: true,
+                    value: manualProtocol ?? EcuProtocol.kwp2000FastInit,
+                    dropdownColor: AppTheme.surface,
+                    decoration: const InputDecoration(
+                      labelText: 'Camada de Protocolo (Troca ao Vivo)',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    items: EcuProtocol.values
+                        .map(
+                          (p) => DropdownMenuItem(
+                            value: p,
+                            child: Text(
+                              p == EcuProtocol.kwp2000FastInit
+                                  ? '${p.displayLabel} (Padrão Palio)'
+                                  : p.displayLabel,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (newProto) async {
+                      if (newProto == null) return;
+                      ref.read(manualEcuProtocolProvider.notifier).state = newProto;
+                      final obdService = ref.read(currentObd2ServiceProvider);
+                      final isConnected = ref.read(btManagerProvider).isConnected;
+                      if (obdService != null && isConnected) {
+                        final ok = await obdService.switchProtocolLive(newProto);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok
+                                    ? 'Protocolo alterado ao vivo para ${newProto.displayLabel}!'
+                                    : 'Falha ao reconfigurar protocolo no adaptador.',
+                              ),
+                              backgroundColor: ok ? Colors.green : Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
                   ),
                   const SizedBox(height: 14),
                   SizedBox(

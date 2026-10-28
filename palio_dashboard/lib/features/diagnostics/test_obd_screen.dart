@@ -51,12 +51,16 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
   bool _isAutoSuiteRunning = false;
   String? _autoSuiteSummary;
   bool _autoScroll = true;
+  late EcuProtocol _selectedProtocol;
 
   late final List<_TestCase> _testCases;
 
   @override
   void initState() {
     super.initState();
+
+    _selectedProtocol =
+        ref.read(manualEcuProtocolProvider) ?? EcuProtocol.kwp2000FastInit;
 
     _testCases = [
       _TestCase(
@@ -68,8 +72,8 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
       _TestCase(
         id: 'setup',
         title: '2. Configurar Protocolo Palio Fire',
-        command: 'ATSP5 + ATIB10 + ATSH8110F1',
-        description: 'Aplica ISO 14230-4 KWP2000 Fast Init a 10400 bps com cabeçalho 81 10 F1.',
+        command: 'ATSP5 + ATIB10 + ATSH8210F1',
+        description: 'Aplica ISO 14230-4 KWP2000 Fast Init a 10400 bps com cabeçalho 82 10 F1.',
       ),
       _TestCase(
         id: 'atrv',
@@ -122,6 +126,9 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
     ];
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Pausa o loop de background enquanto a central de diagnóstico estiver aberta
+      ref.read(currentObd2ServiceProvider)?.stopLoop();
+
       final btManager = ref.read(btManagerProvider);
       setState(() {
         _trafficLogs.addAll(btManager.trafficHistory);
@@ -147,6 +154,8 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
     _trafficSub?.cancel();
     _cmdController.dispose();
     _terminalScrollController.dispose();
+    // Retoma o loop normal do dashboard ao sair
+    ref.read(currentObd2ServiceProvider)?.startLoop();
     super.dispose();
   }
 
@@ -185,7 +194,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
             await btManager.sendCommand(cmd, timeout: t);
           }
           setState(() {
-            test.rawResponse = 'ATSP5, ATIB10, ATH1, ATSH8110F1 OK';
+            test.rawResponse = 'ATSP5, ATIB10, ATH1, ATSH8210F1 OK';
             test.status = TestStatus.success;
             test.resultValue = 'Configurado para Palio Fire (KWP2000 Fast Init)';
           });
@@ -238,13 +247,34 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
-              test.resultValue = '${rpm.toStringAsFixed(0)} RPM';
+              test.resultValue = '${rpm.toStringAsFixed(0)} RPM (Modo 01)';
             });
           } else {
+            // Fallback para Service 21 Marelli Local ID 01 (comum em IAW 4AF/4SF)
+            try {
+              final locRaw = await btManager.sendCommand(
+                '21 01',
+                timeout: const Duration(seconds: 3),
+              );
+              final locParsed = parseMarelliResponse(locRaw);
+              if (locParsed != null && locParsed.dataBytes.length >= 2) {
+                final locRpm = MarelliFormulas.rpm(locParsed.dataBytes);
+                setState(() {
+                  test.rawResponse =
+                      '01 0C: ${raw.replaceAll('>', '').trim()} | 21 01: ${locRaw.replaceAll('>', '').trim()}';
+                  test.status = TestStatus.success;
+                  test.resultValue =
+                      '${locRpm.toStringAsFixed(0)} RPM (Marelli Service 21)';
+                });
+                break;
+              }
+            } catch (_) {}
+
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
-              test.errorMessage = 'Sem leitura de RPM ($raw)';
+              test.errorMessage =
+                  'Sem leitura de RPM via 01 0C nem 21 01 ($raw)';
             });
           }
           break;
@@ -467,6 +497,40 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
     });
   }
 
+  Future<void> _switchProtocol(EcuProtocol proto) async {
+    final btManager = ref.read(btManagerProvider);
+    if (!btManager.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bluetooth não conectado. Conecte nas Configurações.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final obdService = ref.read(currentObd2ServiceProvider);
+    if (obdService != null) {
+      final ok = await obdService.switchProtocolLive(proto);
+      if (mounted) {
+        setState(() {
+          _selectedProtocol = proto;
+        });
+        ref.read(manualEcuProtocolProvider.notifier).state = proto;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ok
+                  ? 'Protocolo alterado ao vivo para ${proto.displayLabel}!'
+                  : 'Falha ao reconfigurar protocolo no adaptador.',
+            ),
+            backgroundColor: ok ? Colors.green : Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final btManager = ref.watch(btManagerProvider);
@@ -543,9 +607,72 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
                       color: Colors.white10,
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: const Text(
-                      'Fast Init 10400 bps • ATSH8110F1',
-                      style: TextStyle(color: Colors.white70, fontSize: 11),
+                    child: Text(
+                      _selectedProtocol == EcuProtocol.kwp2000FastInit
+                          ? 'Palio Fire • Fast Init • ATSH8210F1'
+                          : _selectedProtocol.displayLabel,
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Barra de troca rápida de protocolo ao vivo
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              color: const Color(0xFF161B22),
+              child: Row(
+                children: [
+                  const Icon(Icons.sync_alt, color: AppTheme.accent, size: 16),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Protocolo:',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: EcuProtocol.values.map((p) {
+                          final isSelected = p == _selectedProtocol;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(
+                                p == EcuProtocol.kwp2000FastInit
+                                    ? 'Palio Fire (KWP2000 Fast)'
+                                    : (p == EcuProtocol.obd2Auto
+                                        ? 'OBD-II Auto'
+                                        : (p == EcuProtocol.kwp2000SlowInit
+                                            ? 'KWP Slow'
+                                            : 'ISO 9141-2')),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight:
+                                      isSelected ? FontWeight.bold : FontWeight.normal,
+                                  color: isSelected ? Colors.black : Colors.white70,
+                                ),
+                              ),
+                              selected: isSelected,
+                              selectedColor: AppTheme.accent,
+                              backgroundColor: AppTheme.surface,
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              onSelected: (selected) {
+                                if (selected) {
+                                  _switchProtocol(p);
+                                }
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
                   ),
                 ],

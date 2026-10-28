@@ -172,4 +172,25 @@ void main() {
       expect(MarelliPid.dashboardLoop.contains(MarelliPid.tps), isTrue);
     });
   });
+
+  group('KWP2000 Fast Init ATSH8210F1 configuration', () {
+    test('kElm327SetupKwp2000FastInit configura ATSH8210F1 para comandos de 2 bytes', () {
+      expect(kElm327SetupKwp2000FastInit.contains('ATSH8210F1'), isTrue);
+      expect(kElm327SetupKwp2000FastInit.contains('ATSH8110F1'), isFalse);
+    });
+
+    test('parseMarelliResponse lida com eco do comando e respostas sujas de clones ELM327', () {
+      // Exemplo com eco do comando antes da resposta KWP2000
+      final resultWithEcho = parseMarelliResponse('01 0C\r\n84 F1 10 41 0C 1F 40 31\r\n>');
+      expect(resultWithEcho, isNotNull);
+      expect(resultWithEcho!.dataBytes, [0x1F, 0x40]);
+      expect(MarelliFormulas.rpm(resultWithEcho.dataBytes), 2000.0);
+
+      // Exemplo com BUS INIT: OK antes da resposta
+      final resultWithBusInit = parseMarelliResponse('BUS INIT: OK\r\n84 F1 10 41 0C 1F 40 31\r\n>');
+      expect(resultWithBusInit, isNotNull);
+      expect(resultWithBusInit!.dataBytes, [0x1F, 0x40]);
+      expect(MarelliFormulas.rpm(resultWithBusInit.dataBytes), 2000.0);
+    });
+  });
 }

@@ -1,7 +1,7 @@
 import 'marelli_protocol.dart';
 
 /// PIDs de monitoramento para o Fiat Palio (Marelli IAW 4AF / 4SF / 59F / 4GF).
-/// Com o ELM327 configurado via ATSH 81 10 F1 (padrão AlfaOBD), o adaptador
+/// Com o ELM327 configurado via ATSH 82 10 F1 (padrão AlfaOBD para payloads de 2 bytes), o adaptador
 /// empacota o header KWP2000 e calcula o checksum automaticamente.
 enum MarelliPid {
   rpm(

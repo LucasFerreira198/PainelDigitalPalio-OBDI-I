@@ -152,6 +152,11 @@ class Obd2Service {
     try {
       final locRaw = await btManager.sendCommand('21 01', timeout: const Duration(seconds: 2));
       if (!isElmFailureResponse(locRaw) && (locRaw.contains('61') || locRaw.contains('01'))) {
+        final parsed = parseMarelliResponse(locRaw);
+        if (parsed != null && parsed.dataBytes.length >= 2) {
+          final rpmVal = MarelliFormulas.rpm(parsed.dataBytes);
+          _last = _last.copyWith(rpm: rpmVal);
+        }
         await _readPid(MarelliPid.batteryVoltage);
         _last = _last.copyWith(
           ecuResponding: true,
@@ -322,6 +327,54 @@ class Obd2Service {
     await prefs.setString(_lastLayerKey, protocol.name);
   }
 
+  /// Retorna a última camada de protocolo gravada com sucesso nas preferências.
+  Future<EcuProtocol?> loadRememberedProtocol() => _loadLastLayer();
+
+  /// Reconfigura o chip ELM327 para um novo protocolo [protocol]
+  /// em tempo real, mantendo o socket Bluetooth conectado sem interrupções.
+  Future<bool> switchProtocolLive(EcuProtocol protocol) async {
+    _logSink?.call(
+      LogLevel.info,
+      'obd2',
+      'Reconfigurando adaptador ao vivo para ${protocol.displayLabel}...',
+    );
+    final wasRunning = _running;
+    if (wasRunning) {
+      _running = false;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    btManager.clearQueue();
+    try {
+      await setupAdapter(protocol: protocol);
+      _activeLayer = protocol;
+      _last = _last.copyWith(
+        ecuProtocolLabel: protocol.displayLabel,
+        ecuResponding: false,
+      );
+      _dataController.add(_last);
+      await _saveLastLayer(protocol);
+      _logSink?.call(
+        LogLevel.info,
+        'obd2',
+        'Protocolo ${protocol.displayLabel} aplicado ao vivo com sucesso!',
+      );
+      if (wasRunning) {
+        unawaited(startLoop());
+      }
+      return true;
+    } catch (e) {
+      _logSink?.call(
+        LogLevel.error,
+        'obd2',
+        'Falha ao trocar protocolo ao vivo: $e',
+      );
+      if (wasRunning) {
+        unawaited(startLoop());
+      }
+      return false;
+    }
+  }
+
   /// Inicia o loop contínuo de leitura dos PIDs da camada de protocolo
   /// ativa ([activeProtocol]). Cada ciclo lê os PIDs em sequência e emite
   /// um snapshot consolidado de [OBDDataModel].
@@ -404,6 +457,23 @@ class Obd2Service {
       );
       final parsed = parseMarelliResponse(raw);
       if (parsed == null) {
+        // Fallback especial para RPM: se 01 0C não retornar dados, tenta Service 21 Marelli (21 01)
+        if (pid == MarelliPid.rpm) {
+          try {
+            final locRaw = await btManager.sendCommand(
+              '21 01',
+              timeout: const Duration(milliseconds: 1500),
+            );
+            final locParsed = parseMarelliResponse(locRaw);
+            if (locParsed != null && locParsed.dataBytes.length >= 2) {
+              final locRpm = MarelliFormulas.rpm(locParsed.dataBytes);
+              _loggedFailures.remove(pid);
+              _last = _applyPidValue(pid, locRpm);
+              return true;
+            }
+          } catch (_) {}
+        }
+
         if (_loggedFailures.add(pid)) {
           _logSink?.call(
             LogLevel.warn,

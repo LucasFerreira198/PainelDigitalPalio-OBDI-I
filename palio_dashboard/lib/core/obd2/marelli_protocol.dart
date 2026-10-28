@@ -70,7 +70,7 @@ const List<String> kElm327SetupKwp2000SlowInit = [
 /// - ATSP5: Fast Init ISO 14230-4 KWP
 /// - ATIB10: Baudrate 10400 bps (crítico para handshake Marelli)
 /// - ATH1: Headers ativados para validação de origem da ECU (10 = Marelli)
-/// - ATSH8110F1: Header KWP físico (81 = formato físico 1 byte, 10 = ECU Motor, F1 = Scanner)
+/// - ATSH8210F1: Header KWP físico (82 = formato físico para 2 bytes de dados como 01 0C, 21 01, 1A 97; 10 = ECU Motor; F1 = Scanner)
 const List<String> kElm327SetupKwp2000FastInit = [
   'ATZ',
   'ATE0',
@@ -80,7 +80,7 @@ const List<String> kElm327SetupKwp2000FastInit = [
   'ATSP5',
   'ATIB10',
   'ATH1',
-  'ATSH8110F1',
+  'ATSH8210F1',
   'ATST96',
 ];
 
@@ -159,63 +159,61 @@ MarelliParseResult? parseMarelliResponse(String raw) {
   }
   if (bytes.isEmpty) return null;
 
-  // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 (Formato: [8X] [F1] [10] [41/5A/61] [PID/Sub] ... [CS])
-  if (bytes.length >= 6 && bytes[1] == 0xF1 && bytes[2] == 0x10) {
-    final sResp = bytes[3];
-    if (sResp == 0x41 || sResp == 0x61 || sResp == 0x5A) {
-      final checksum = bytes.last;
-      final computed = bytes
-              .sublist(0, bytes.length - 1)
-              .fold<int>(0, (sum, b) => sum + b) &
-          0xFF;
-      if (computed == checksum) {
-        final dataBytes = bytes.sublist(5, bytes.length - 1);
-        if (dataBytes.isNotEmpty) {
-          return MarelliParseResult(dataBytes);
+  // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 em qualquer posição dos bytes
+  // Procura padrão [FMT] [0xF1] [0x10] [41|61|5A] para ser imune a ecos ou lixo anterior
+  for (var i = 1; i <= bytes.length - 4; i++) {
+    if (bytes[i] == 0xF1 && bytes[i + 1] == 0x10) {
+      final sResp = bytes[i + 2];
+      if (sResp == 0x41 || sResp == 0x61 || sResp == 0x5A) {
+        final headerStart = i - 1;
+        final checksum = bytes.last;
+        final computed = bytes
+                .sublist(headerStart, bytes.length - 1)
+                .fold<int>(0, (sum, b) => sum + b) &
+            0xFF;
+        if (computed == checksum) {
+          final dataBytes = bytes.sublist(i + 4, bytes.length - 1);
+          if (dataBytes.isNotEmpty) {
+            return MarelliParseResult(dataBytes);
+          }
+          if (i + 3 < bytes.length - 1) {
+            return MarelliParseResult([bytes[i + 3]]);
+          }
         }
-        return MarelliParseResult([bytes[4]]);
-      }
-      // Se não bateu checksum, verifica se o clone não emitiu checksum
-      // (isto é, total de bytes após cabeçalho de 3 bytes é exatamente igual ao comprimento no byte 0)
-      final expectedPayloadLen = bytes[0] & 0x3F;
-      if (expectedPayloadLen > 0 && (bytes.length - 3) == expectedPayloadLen) {
-        final dataBytes = bytes.sublist(5);
-        if (dataBytes.isNotEmpty) {
-          return MarelliParseResult(dataBytes);
+        // Se clone do ELM327 omitiu o byte de checksum:
+        final expectedPayloadLen = bytes[headerStart] & 0x3F;
+        if (expectedPayloadLen > 0 &&
+            (bytes.length - headerStart - 3) == expectedPayloadLen) {
+          final dataBytes = bytes.sublist(i + 4);
+          if (dataBytes.isNotEmpty) {
+            return MarelliParseResult(dataBytes);
+          }
+          if (i + 3 < bytes.length) {
+            return MarelliParseResult([bytes[i + 3]]);
+          }
         }
-        return MarelliParseResult([bytes[4]]);
       }
     }
-    return null;
   }
 
   // 2. Resposta legada ISO 9141 funcional (48 6B 10 ...)
-  if (bytes.length >= 6 &&
-      bytes[0] == 0x48 &&
-      bytes[1] == 0x6B &&
-      bytes[2] == 0x10) {
-    final checksum = bytes.last;
-    final computed = bytes
-            .sublist(0, bytes.length - 1)
-            .fold<int>(0, (sum, b) => sum + b) &
-        0xFF;
-    if (computed == checksum) {
-      final dataBytes = bytes.sublist(5, bytes.length - 1);
-      if (dataBytes.isNotEmpty) {
-        return MarelliParseResult(dataBytes);
+  for (var i = 0; i <= bytes.length - 6; i++) {
+    if (bytes[i] == 0x48 && bytes[i + 1] == 0x6B && bytes[i + 2] == 0x10) {
+      final checksum = bytes.last;
+      final computed = bytes
+              .sublist(i, bytes.length - 1)
+              .fold<int>(0, (sum, b) => sum + b) &
+          0xFF;
+      if (computed == checksum) {
+        final dataBytes = bytes.sublist(i + 5, bytes.length - 1);
+        if (dataBytes.isNotEmpty) {
+          return MarelliParseResult(dataBytes);
+        }
       }
     }
-    return null;
   }
 
-  // 3. Resposta com cabeçalho de 3 bytes para ECU Marelli (xx xx 10 41/5A/61...), mas header desconhecido
-  if (bytes.length >= 5 &&
-      bytes[2] == 0x10 &&
-      (bytes[3] == 0x41 || bytes[3] == 0x61 || bytes[3] == 0x5A)) {
-    return null;
-  }
-
-  // 4. Resposta padrão OBD2 sem cabeçalhos (inicia diretamente ou após eco com 41, 5A ou 61: 41 <PID> <DADOS...>)
+  // 3. Resposta padrão OBD2 sem cabeçalhos (41 <PID> <DADOS...> ou 61 <ID> <DADOS...> ou 5A <ID> <DADOS...>)
   for (var i = 0; i <= bytes.length - 2; i++) {
     if (bytes[i] == 0x41 || bytes[i] == 0x61 || bytes[i] == 0x5A) {
       final dataBytes = bytes.sublist(i + 2);
