@@ -187,19 +187,53 @@ class _PcDashboardScreenState extends ConsumerState<PcDashboardScreen> {
                 hintStyle: TextStyle(color: Colors.white38),
                 border: InputBorder.none,
               ),
+              onSubmitted: (_) => _connectWebSocket(),
             ),
           ),
           ElevatedButton(
-            onPressed: () {
-              ref.read(pcWsAddressProvider.notifier).state =
-                  _addressController.text.trim();
-              ref.read(pcReconnectTokenProvider.notifier).state++;
-            },
+            onPressed: _connectWebSocket,
             child: const Text('Conectar'),
           ),
         ],
       ),
     );
+  }
+
+  void _connectWebSocket() {
+    var target = _addressController.text.trim();
+    if (target.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Digite o endereço IP do celular (exibido nas Configurações do app).'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (!target.startsWith('ws://') && !target.startsWith('wss://')) {
+      target = 'ws://$target';
+    }
+    // Adiciona a porta 8765 se omitida
+    final parts = target.replaceFirst(RegExp(r'^ws(s)?://'), '').split(':');
+    if (parts.length == 1) {
+      target = '$target:8765';
+    }
+
+    final uri = Uri.tryParse(target);
+    if (uri == null || uri.host.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Endereço inválido. Exemplo: ws://192.168.1.50:8765'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    _addressController.text = target;
+    ref.read(pcWsAddressProvider.notifier).state = target;
+    ref.read(pcReconnectTokenProvider.notifier).state++;
   }
 
   Widget _buildCodeBar() {
@@ -214,22 +248,35 @@ class _PcDashboardScreenState extends ConsumerState<PcDashboardScreen> {
               style: const TextStyle(color: Colors.white),
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                hintText: 'Código exibido nas Configurações do celular',
+                hintText: 'Código PIN de 6 dígitos gerado no celular',
                 hintStyle: TextStyle(color: Colors.white38),
                 border: InputBorder.none,
               ),
+              onSubmitted: (_) => _connectCloudRelay(),
             ),
           ),
           ElevatedButton(
-            onPressed: () {
-              ref.read(pcCloudCodeProvider.notifier).state =
-                  _codeController.text.trim();
-              ref.read(pcReconnectTokenProvider.notifier).state++;
-            },
+            onPressed: _connectCloudRelay,
             child: const Text('Conectar'),
           ),
         ],
       ),
     );
+  }
+
+  void _connectCloudRelay() {
+    final code = _codeController.text.trim();
+    if (code.isEmpty || code.length != 6 || int.tryParse(code) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Código PIN inválido. Digite os 6 números gerados no celular.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    ref.read(pcCloudCodeProvider.notifier).state = code;
+    ref.read(pcReconnectTokenProvider.notifier).state++;
   }
 }

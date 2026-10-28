@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../shared/models/obd_data_model.dart';
 import '../bluetooth/bt_manager.dart';
 import '../diagnostics/remote_log_service.dart';
+import 'dtc_decoder.dart';
 import 'marelli_protocol.dart';
 import 'pid_definitions.dart';
 import 'standard_obd2_pid_definitions.dart';
@@ -148,15 +149,12 @@ class Obd2Service {
       return true;
     }
 
-    // 4. Fallback: comando Marelli Service 21 (21 01)
+    // 4. Fallback: comando Marelli Service 21 Status (21 01) para confirmar ECU acordada
     try {
       final locRaw = await btManager.sendCommand('21 01', timeout: const Duration(seconds: 2));
       if (!isElmFailureResponse(locRaw) && (locRaw.contains('61') || locRaw.contains('01'))) {
-        final parsed = parseMarelliResponse(locRaw);
-        if (parsed != null && parsed.dataBytes.length >= 2) {
-          final rpmVal = MarelliFormulas.rpm(parsed.dataBytes);
-          _last = _last.copyWith(rpm: rpmVal);
-        }
+        // ECU confirmou comunicação KWP2000! Agora lê os sensores reais (RPM e Bateria)
+        await _readPid(MarelliPid.rpm, timeout: const Duration(milliseconds: 1000));
         await _readPid(MarelliPid.batteryVoltage);
         _last = _last.copyWith(
           ecuResponding: true,
@@ -495,7 +493,7 @@ class Obd2Service {
             );
             final locParsed = parseMarelliResponse(locRaw);
             if (locParsed != null && locParsed.dataBytes.length >= 2) {
-              final locRpm = MarelliFormulas.rpm(locParsed.dataBytes);
+              final locRpm = StandardObd2Formulas.rpm(locParsed.dataBytes);
               _loggedFailures.remove(pid);
               _last = _applyPidValue(pid, locRpm);
               return true;
@@ -648,6 +646,73 @@ class Obd2Service {
       case StandardObd2Pid.batteryVoltage:
         return _last.copyWith(batteryV: value, timestamp: DateTime.now());
     }
+  }
+
+  /// Lê códigos de falha (DTC) da ECU via KWP2000 (Service 18 00 FF 00)
+  /// ou fallback padrão OBD2 Modo 03.
+  Future<List<String>> readDtcs() async {
+    if (!btManager.isConnected) return [];
+
+    // 1. Tenta Modo KWP2000 Service 18
+    try {
+      final raw = await btManager.sendCommand(
+        '18 00 FF 00',
+        timeout: const Duration(seconds: 4),
+      );
+      if (!isElmFailureResponse(raw) && (raw.contains('58') || raw.contains('18'))) {
+        final parsed = parseMarelliResponse(raw);
+        if (parsed != null && parsed.dataBytes.isNotEmpty) {
+          // No Service 18, o primeiro byte após o SID/LocalID pode ser o contador
+          final dBytes = parsed.dataBytes.length > 1
+              ? parsed.dataBytes.sublist(1)
+              : parsed.dataBytes;
+          final dtcs = decodeDtcBytes(dBytes);
+          _last = _last.copyWith(activeDtcs: dtcs);
+          _dataController.add(_last);
+          return dtcs;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback Modo 03 OBD2 Padrão
+    try {
+      final raw03 = await btManager.sendCommand('03', timeout: const Duration(seconds: 4));
+      if (!isElmFailureResponse(raw03) && raw03.contains('43')) {
+        final parsed03 = parseMarelliResponse(raw03);
+        if (parsed03 != null && parsed03.dataBytes.isNotEmpty) {
+          final dtcs = decodeDtcBytes(parsed03.dataBytes);
+          _last = _last.copyWith(activeDtcs: dtcs);
+          _dataController.add(_last);
+          return dtcs;
+        }
+      }
+    } catch (_) {}
+
+    return [];
+  }
+
+  /// Limpa os códigos de falha da ECU via KWP2000 Service 14 FF 00 ou Modo 04.
+  Future<bool> clearDtcs() async {
+    if (!btManager.isConnected) return false;
+    try {
+      final raw14 = await btManager.sendCommand('14 FF 00', timeout: const Duration(seconds: 4));
+      if (!isElmFailureResponse(raw14) && (raw14.contains('54') || raw14.contains('OK'))) {
+        _last = _last.copyWith(activeDtcs: const []);
+        _dataController.add(_last);
+        return true;
+      }
+    } catch (_) {}
+
+    try {
+      final raw04 = await btManager.sendCommand('04', timeout: const Duration(seconds: 4));
+      if (!isElmFailureResponse(raw04) && (raw04.contains('44') || raw04.contains('OK'))) {
+        _last = _last.copyWith(activeDtcs: const []);
+        _dataController.add(_last);
+        return true;
+      }
+    } catch (_) {}
+
+    return false;
   }
 
   Future<void> dispose() async {

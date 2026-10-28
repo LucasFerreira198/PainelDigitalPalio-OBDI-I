@@ -1,10 +1,6 @@
-/// Comando para solicitar DTCs ativos no modo diagnóstico Marelli.
-/// ATENÇÃO: assim como os demais comandos em `pid_definitions.dart`, este
-/// header é uma aproximação e precisa ser validado no carro real — a leitura
-/// de falhas no IAW costuma usar um modo próprio (não necessariamente o
-/// mesmo "21" usado pelos PIDs de leitura em tempo real).
-const String kReadDtcsCommand = '68 6A F1 21 70 8F';
-const String kClearDtcsCommand = '68 6A F1 04 87';
+/// Comandos oficiais KWP2000 Fiat Marelli IAW 4AF para ler e limpar falhas.
+const String kReadDtcsCommand = '18 00 FF 00';
+const String kClearDtcsCommand = '14 FF 00';
 
 /// Descrições resumidas dos códigos DTC mais comuns. Não é uma lista
 /// exaustiva — qualquer código fora deste mapa é exibido sem descrição.

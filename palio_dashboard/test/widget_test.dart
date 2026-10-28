@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:palio_dashboard/core/ota/ota_provider.dart';
 import 'package:palio_dashboard/core/ota/ota_service.dart';
 import 'package:palio_dashboard/features/dashboard/dashboard_provider.dart';
+import 'package:palio_dashboard/features/dtc/dtc_provider.dart';
+import 'package:palio_dashboard/features/dtc/dtc_screen.dart';
+import 'package:palio_dashboard/features/pc_viewer/pc_dashboard_screen.dart';
 import 'package:palio_dashboard/features/settings/settings_provider.dart';
 import 'package:palio_dashboard/features/settings/settings_screen.dart';
 import 'package:palio_dashboard/main.dart';
@@ -120,5 +123,39 @@ void main() {
     expect(find.text('Veículo & Injeção Eletrônica'), findsOneWidget);
     expect(find.text('Tema Visual dos Instrumentos'), findsOneWidget);
     expect(find.text('Alertas & Avisos de Segurança'), findsOneWidget);
+  });
+
+  testWidgets('DtcScreen exibe mensagem de sucesso quando sem falhas', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          dtcListProvider.overrideWith((ref) => Future.value([])),
+        ],
+        child: const MaterialApp(
+          home: DtcScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Diagnóstico de Falhas (DTC)'), findsOneWidget);
+    expect(find.text('Nenhuma falha ativa registrada na ECU'), findsOneWidget);
+  });
+
+  testWidgets('PcDashboardScreen carrega com seletor de modo e campo de conexão', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: PcDashboardScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('PalioDash — PC Viewer'), findsOneWidget);
   });
 }

@@ -67,7 +67,6 @@ class DashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final obdAsync = ref.watch(obdDataProvider);
     final data = obdAsync.value ?? OBDDataModel.empty();
-    final rpmHistory = ref.watch(rpmHistoryProvider);
     final speedUnit = ref.watch(speedUnitProvider);
     final tempUnit = ref.watch(tempUnitProvider);
     final pressureUnit = ref.watch(pressureUnitProvider);
@@ -204,8 +203,10 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: LambdaGauge(
-                        lambda: data.lambda,
+                      child: PidTile(
+                        label: 'Lambda',
+                        value: data.lambda > 0 ? data.lambda.toStringAsFixed(2) : '--',
+                        unit: 'λ',
                         theme: clusterTheme,
                       ),
                     ),
@@ -250,9 +251,14 @@ class DashboardScreen extends ConsumerWidget {
                     Expanded(
                       flex: 3,
                       child: showRpmChart
-                          ? RpmChart(
-                              spots: rpmHistory,
-                              theme: clusterTheme,
+                          ? Consumer(
+                              builder: (context, ref, _) {
+                                final spots = ref.watch(rpmHistoryProvider);
+                                return RpmChart(
+                                  spots: spots,
+                                  theme: clusterTheme,
+                                );
+                              },
                             )
                           : Container(
                               decoration: AppTheme.cockpitCardDecoration(
@@ -458,9 +464,9 @@ class DashboardScreen extends ConsumerWidget {
                                             ),
                                     ),
                                   IconButton(
-                                    iconSize: iconSize,
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
+                                    iconSize: compact ? 20.0 : 24.0,
+                                    padding: const EdgeInsets.all(4),
+                                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                                     visualDensity: VisualDensity.compact,
                                     icon: const Icon(
                                       Icons.terminal_rounded,
@@ -476,13 +482,12 @@ class DashboardScreen extends ConsumerWidget {
                                   ),
                                   const SizedBox(width: 4),
                                   IconButton(
-                                    iconSize: iconSize,
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
+                                    iconSize: compact ? 20.0 : 24.0,
+                                    padding: const EdgeInsets.all(4),
+                                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                                     visualDensity: VisualDensity.compact,
-                                    icon: Icon(
+                                    icon: const Icon(
                                       Icons.warning_amber,
-                                      size: iconSize,
                                       color: Colors.white54,
                                     ),
                                     tooltip: 'Códigos de falha',
@@ -495,13 +500,12 @@ class DashboardScreen extends ConsumerWidget {
                                   ),
                                   const SizedBox(width: 4),
                                   IconButton(
-                                    iconSize: iconSize,
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
+                                    iconSize: compact ? 20.0 : 24.0,
+                                    padding: const EdgeInsets.all(4),
+                                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                                     visualDensity: VisualDensity.compact,
-                                    icon: Icon(
+                                    icon: const Icon(
                                       Icons.settings,
-                                      size: iconSize,
                                       color: Colors.white54,
                                     ),
                                     tooltip: 'Configurações',

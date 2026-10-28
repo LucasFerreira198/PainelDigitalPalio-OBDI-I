@@ -132,7 +132,7 @@ class BtManager {
       onDone: () {
         logTraffic(BtTrafficType.error, 'Conexão Bluetooth perdida/fechada');
         _logSink?.call(LogLevel.warn, 'bt', 'Conexão Bluetooth perdida');
-        disconnect();
+        unawaited(disconnect());
       },
     );
     await _saveLastAddress(address);
@@ -201,8 +201,18 @@ class BtManager {
     _inFlight = next;
     _buffer.clear();
 
-    logTraffic(BtTrafficType.tx, next.command);
-    _connection!.output.add(ascii.encode('${next.command}\r'));
+    try {
+      logTraffic(BtTrafficType.tx, next.command);
+      _connection!.output.add(ascii.encode('${next.command}\r'));
+    } catch (e) {
+      _inFlight = null;
+      logTraffic(BtTrafficType.error, 'Erro de escrita serial Bluetooth: $e');
+      if (!next.completer.isCompleted) {
+        next.completer.completeError(e);
+      }
+      unawaited(disconnect());
+      return;
+    }
 
     _timeoutTimer = Timer(next.timeout, () {
       if (_inFlight == next) {
