@@ -213,7 +213,14 @@ MarelliParseResult? parseMarelliResponse(String raw) {
     }
   }
 
-  // 3. Resposta padrão OBD2 sem cabeçalhos (41 <PID> <DADOS...> ou 61 <ID> <DADOS...> ou 5A <ID> <DADOS...>)
+  // 3. Resposta com cabeçalho de 3 bytes para ECU Marelli (xx xx 10 41/5A/61...), mas header desconhecido ou checksum inválido
+  if (bytes.length >= 5 &&
+      bytes[2] == 0x10 &&
+      (bytes[3] == 0x41 || bytes[3] == 0x61 || bytes[3] == 0x5A)) {
+    return null;
+  }
+
+  // 4. Resposta padrão OBD2 sem cabeçalhos (41 <PID> <DADOS...> ou 61 <ID> <DADOS...> ou 5A <ID> <DADOS...>)
   for (var i = 0; i <= bytes.length - 2; i++) {
     if (bytes[i] == 0x41 || bytes[i] == 0x61 || bytes[i] == 0x5A) {
       final dataBytes = bytes.sublist(i + 2);
