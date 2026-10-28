@@ -89,39 +89,39 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
       ),
       _TestCase(
         id: 'rpm',
-        title: '5. Rotação do Motor (RPM)',
-        command: '01 0C',
-        description: 'Consulta giro do motor via PID padrão SAE/EOBD modo 01.',
+        title: '5. Rotação do Motor (RPM Marelli 21 30)',
+        command: '21 30',
+        description: 'Consulta giro do motor via Service 21 Local ID 0x30 da ECU Marelli IAW 4AF.',
       ),
       _TestCase(
         id: 'temp',
-        title: '6. Temperatura do Motor',
-        command: '01 05',
-        description: 'Consulta temperatura da água do motor (°C).',
+        title: '6. Temperatura do Motor (Marelli 21 33)',
+        command: '21 33',
+        description: 'Consulta temperatura da água do motor (°C) via Local ID 0x33.',
       ),
       _TestCase(
         id: 'fuel',
-        title: '7. Nível de Combustível',
+        title: '7. Nível de Combustível (Modo 01 2F)',
         command: '01 2F',
-        description: 'Consulta porcentagem do tanque de combustível (0 a 100%).',
+        description: 'Consulta porcentagem do tanque de combustível (quando suportado).',
       ),
       _TestCase(
         id: 'map',
-        title: '8. Pressão no Coletor (MAP)',
-        command: '01 0B',
-        description: 'Consulta pressão absoluta do coletor de admissão (kPa).',
+        title: '8. Pressão no Coletor - MAP (Marelli 21 31)',
+        command: '21 31',
+        description: 'Consulta pressão absoluta do coletor de admissão via Local ID 0x31.',
       ),
       _TestCase(
         id: 'tps',
-        title: '9. Posição da Borboleta (TPS)',
-        command: '01 11',
-        description: 'Consulta ângulo/abertura percentual da borboleta de aceleração.',
+        title: '9. Posição da Borboleta - TPS (Marelli 21 34)',
+        command: '21 34',
+        description: 'Consulta abertura percentual da borboleta via Local ID 0x34.',
       ),
       _TestCase(
         id: 'local21',
-        title: '10. Bloco Local Marelli (Service 21)',
-        command: '21 01',
-        description: 'Consulta bloco de parâmetros proprietários KWP2000 Local ID 01.',
+        title: '10. Velocidade do Veículo (Marelli 21 53)',
+        command: '21 53',
+        description: 'Consulta velocidade do veículo (km/h) via Local ID 0x53.',
       ),
     ];
 
@@ -240,31 +240,31 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           break;
 
         case 'rpm':
-          final raw = await btManager.sendCommand('01 0C', timeout: const Duration(seconds: 3));
+          final raw = await btManager.sendCommand('21 30', timeout: const Duration(seconds: 3));
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.length >= 2) {
             final rpm = MarelliFormulas.rpm(parsed.dataBytes);
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
-              test.resultValue = '${rpm.toStringAsFixed(0)} RPM (Modo 01)';
+              test.resultValue = '${rpm.toStringAsFixed(0)} RPM (Marelli 21 30)';
             });
           } else {
-            // Fallback para Service 21 Marelli Local ID 01 (comum em IAW 4AF/4SF)
+            // Fallback para modo padrão OBD2 01 0C caso a ECU suporte
             try {
-              final locRaw = await btManager.sendCommand(
-                '21 01',
+              final stdRaw = await btManager.sendCommand(
+                '01 0C',
                 timeout: const Duration(seconds: 3),
               );
-              final locParsed = parseMarelliResponse(locRaw);
-              if (locParsed != null && locParsed.dataBytes.length >= 2) {
-                final locRpm = MarelliFormulas.rpm(locParsed.dataBytes);
+              final stdParsed = parseMarelliResponse(stdRaw);
+              if (stdParsed != null && stdParsed.dataBytes.length >= 2) {
+                final stdRpm = MarelliFormulas.rpm(stdParsed.dataBytes);
                 setState(() {
                   test.rawResponse =
-                      '01 0C: ${raw.replaceAll('>', '').trim()} | 21 01: ${locRaw.replaceAll('>', '').trim()}';
+                      '21 30: ${raw.replaceAll('>', '').trim()} | 01 0C: ${stdRaw.replaceAll('>', '').trim()}';
                   test.status = TestStatus.success;
                   test.resultValue =
-                      '${locRpm.toStringAsFixed(0)} RPM (Marelli Service 21)';
+                      '${stdRpm.toStringAsFixed(0)} RPM (Modo Padrão 01 0C)';
                 });
                 break;
               }
@@ -274,22 +274,37 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage =
-                  'Sem leitura de RPM via 01 0C nem 21 01 ($raw)';
+                  'Sem leitura de RPM via 21 30 nem 01 0C ($raw)';
             });
           }
           break;
 
         case 'temp':
-          final raw = await btManager.sendCommand('01 05', timeout: const Duration(seconds: 3));
+          final raw = await btManager.sendCommand('21 33', timeout: const Duration(seconds: 3));
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final t = MarelliFormulas.temp(parsed.dataBytes);
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
-              test.resultValue = '${t.toStringAsFixed(0)} °C';
+              test.resultValue = '${t.toStringAsFixed(0)} °C (Marelli 21 33)';
             });
           } else {
+            // Fallback para modo padrão 01 05
+            try {
+              final stdRaw = await btManager.sendCommand('01 05', timeout: const Duration(seconds: 2));
+              final stdParsed = parseMarelliResponse(stdRaw);
+              if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
+                final t = MarelliFormulas.temp(stdParsed.dataBytes);
+                setState(() {
+                  test.rawResponse = '21 33: ${raw.replaceAll('>', '').trim()} | 01 05: ${stdRaw.replaceAll('>', '').trim()}';
+                  test.status = TestStatus.success;
+                  test.resultValue = '${t.toStringAsFixed(0)} °C (Modo 01 05)';
+                });
+                break;
+              }
+            } catch (_) {}
+
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
@@ -313,22 +328,37 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
-              test.errorMessage = 'Sem leitura de nível de combustível ($raw)';
+              test.errorMessage = 'Nível de combustível não disponível via ECU de injeção (no Palio 2010 a boia é ligada ao painel de instrumentos IPC)';
             });
           }
           break;
 
         case 'map':
-          final raw = await btManager.sendCommand('01 0B', timeout: const Duration(seconds: 3));
+          final raw = await btManager.sendCommand('21 31', timeout: const Duration(seconds: 3));
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final mapVal = MarelliFormulas.map(parsed.dataBytes);
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
-              test.resultValue = '${mapVal.toStringAsFixed(0)} kPa';
+              test.resultValue = '${mapVal.toStringAsFixed(0)} kPa (Marelli 21 31)';
             });
           } else {
+            // Fallback modo 01 0B
+            try {
+              final stdRaw = await btManager.sendCommand('01 0B', timeout: const Duration(seconds: 2));
+              final stdParsed = parseMarelliResponse(stdRaw);
+              if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
+                final mapVal = MarelliFormulas.map(stdParsed.dataBytes);
+                setState(() {
+                  test.rawResponse = '21 31: ${raw.replaceAll('>', '').trim()} | 01 0B: ${stdRaw.replaceAll('>', '').trim()}';
+                  test.status = TestStatus.success;
+                  test.resultValue = '${mapVal.toStringAsFixed(0)} kPa (Modo 01 0B)';
+                });
+                break;
+              }
+            } catch (_) {}
+
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
@@ -338,16 +368,31 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           break;
 
         case 'tps':
-          final raw = await btManager.sendCommand('01 11', timeout: const Duration(seconds: 3));
+          final raw = await btManager.sendCommand('21 34', timeout: const Duration(seconds: 3));
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final tpsVal = MarelliFormulas.tps(parsed.dataBytes);
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
-              test.resultValue = '${tpsVal.toStringAsFixed(1)}%';
+              test.resultValue = '${tpsVal.toStringAsFixed(1)}% (Marelli 21 34)';
             });
           } else {
+            // Fallback modo 01 11
+            try {
+              final stdRaw = await btManager.sendCommand('01 11', timeout: const Duration(seconds: 2));
+              final stdParsed = parseMarelliResponse(stdRaw);
+              if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
+                final tpsVal = MarelliFormulas.tps(stdParsed.dataBytes);
+                setState(() {
+                  test.rawResponse = '21 34: ${raw.replaceAll('>', '').trim()} | 01 11: ${stdRaw.replaceAll('>', '').trim()}';
+                  test.status = TestStatus.success;
+                  test.resultValue = '${tpsVal.toStringAsFixed(1)}% (Modo 01 11)';
+                });
+                break;
+              }
+            } catch (_) {}
+
             setState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
@@ -357,19 +402,35 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           break;
 
         case 'local21':
-          final raw = await btManager.sendCommand('21 01', timeout: const Duration(seconds: 3));
-          final clean = raw.replaceAll('>', '').trim();
-          if (!isElmFailureResponse(raw) && (clean.contains('61') || clean.contains('01'))) {
+          final raw = await btManager.sendCommand('21 53', timeout: const Duration(seconds: 3));
+          final parsed = parseMarelliResponse(raw);
+          if (parsed != null && parsed.dataBytes.isNotEmpty) {
+            final spd = MarelliFormulas.speed(parsed.dataBytes);
             setState(() {
-              test.rawResponse = clean;
+              test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
-              test.resultValue = 'Bloco Marelli recebido: $clean';
+              test.resultValue = '${spd.toStringAsFixed(0)} km/h (Marelli 21 53)';
             });
           } else {
+            // Fallback modo 01 0D
+            try {
+              final stdRaw = await btManager.sendCommand('01 0D', timeout: const Duration(seconds: 2));
+              final stdParsed = parseMarelliResponse(stdRaw);
+              if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
+                final spd = MarelliFormulas.speed(stdParsed.dataBytes);
+                setState(() {
+                  test.rawResponse = '21 53: ${raw.replaceAll('>', '').trim()} | 01 0D: ${stdRaw.replaceAll('>', '').trim()}';
+                  test.status = TestStatus.success;
+                  test.resultValue = '${spd.toStringAsFixed(0)} km/h (Modo 01 0D)';
+                });
+                break;
+              }
+            } catch (_) {}
+
             setState(() {
-              test.rawResponse = clean;
+              test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
-              test.errorMessage = 'Sem resposta do Local ID 01 ($clean)';
+              test.errorMessage = 'Sem leitura de velocidade via 21 53 nem 01 0D ($raw)';
             });
           }
           break;

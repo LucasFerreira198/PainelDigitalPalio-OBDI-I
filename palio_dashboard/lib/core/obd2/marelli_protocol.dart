@@ -1,32 +1,94 @@
 /// Fórmulas de conversão dos PIDs proprietários Fiat/Marelli.
 /// Fatores baseados em engenharia reversa documentada pela comunidade
-/// (FiatECUScan/MultiECUScan) — precisam ser validados no carro real.
+/// (AlfaOBD / MultiECUScan / FiatECUScan) para ECUs Magneti Marelli IAW 4AF / 4EF / 59F / 5AF.
 class MarelliFormulas {
   MarelliFormulas._();
 
-  static double rpm(List<int> bytes) => (bytes[0] * 256 + bytes[1]) / 4;
+  /// Rotação do motor (RPM): Service 21 Local ID 0x30.
+  /// Payload de 16-bit com slope 0.25 (ou / 4.0): RPM = ((MSB * 256) + LSB) * 0.25.
+  static double rpm(List<int> bytes) {
+    if (bytes.length >= 2) {
+      return ((bytes[0] * 256 + bytes[1]) / 4).toDouble();
+    }
+    return 0.0;
+  }
 
-  static double speed(List<int> bytes) => bytes[0].toDouble();
+  /// Velocidade do veículo (km/h): Service 21 Local ID 0x53.
+  /// Payload de 8-bit com slope 1.0 (ou byte único).
+  static double speed(List<int> bytes) {
+    if (bytes.isNotEmpty) {
+      return bytes[0].toDouble();
+    }
+    return 0.0;
+  }
 
-  static double temp(List<int> bytes) => (bytes[0] - 40).toDouble();
+  /// Temperatura do líquido de arrefecimento (°C): Service 21 Local ID 0x33.
+  /// Payload de 8-bit com offset -40: Temp = byte[0] - 40.
+  static double temp(List<int> bytes) {
+    if (bytes.isNotEmpty) {
+      return (bytes[0] - 40).toDouble();
+    }
+    return 0.0;
+  }
 
-  static double map(List<int> bytes) => bytes[0].toDouble();
+  /// Pressão absoluta no coletor (MAP): Service 21 Local ID 0x31.
+  /// Retornado em mbar (16-bit); convertido para kPa se > 255.
+  static double map(List<int> bytes) {
+    if (bytes.length >= 2) {
+      final mbar = bytes[0] * 256 + bytes[1];
+      return mbar > 255 ? mbar / 10.0 : mbar.toDouble();
+    }
+    if (bytes.isNotEmpty) {
+      return bytes[0].toDouble();
+    }
+    return 0.0;
+  }
 
-  static double tps(List<int> bytes) => bytes[0] * 100 / 255;
+  /// Posição da borboleta de aceleração (TPS, %): Service 21 Local ID 0x34.
+  /// Payload de 8-bit (0 a 255 -> 0% a 100%).
+  static double tps(List<int> bytes) {
+    if (bytes.isNotEmpty) {
+      return (bytes[0] * 100.0) / 255.0;
+    }
+    return 0.0;
+  }
 
-  static double lambda(List<int> bytes) =>
-      (bytes[0] * 256 + bytes[1]) / 32768 * 2;
+  static double lambda(List<int> bytes) {
+    if (bytes.length >= 2) {
+      return (bytes[0] * 256 + bytes[1]) / 32768.0 * 2.0;
+    }
+    return 1.0;
+  }
 
-  static double injection(List<int> bytes) =>
-      (bytes[0] * 256 + bytes[1]) / 1000;
+  static double injection(List<int> bytes) {
+    if (bytes.length >= 2) {
+      return (bytes[0] * 256 + bytes[1]) / 1000.0;
+    }
+    return 0.0;
+  }
 
-  static double ignition(List<int> bytes) => bytes[0] / 2 - 64;
+  static double ignition(List<int> bytes) {
+    if (bytes.isNotEmpty) {
+      return bytes[0] / 2.0 - 64.0;
+    }
+    return 0.0;
+  }
 
-  static double voltage(List<int> bytes) => bytes[0] / 10;
+  static double voltage(List<int> bytes) {
+    if (bytes.isNotEmpty) {
+      return bytes[0] / 10.0;
+    }
+    return 0.0;
+  }
 
   /// Nível de combustível do tanque em porcentagem (0 a 100%).
   /// Fórmula padrão SAE J1979 PID 0x2F (A * 100 / 255).
-  static double fuelLevel(List<int> bytes) => (bytes[0] * 100.0) / 255.0;
+  static double fuelLevel(List<int> bytes) {
+    if (bytes.isNotEmpty) {
+      return (bytes[0] * 100.0) / 255.0;
+    }
+    return 0.0;
+  }
 }
 
 /// Comandos AT que configuram apenas o chip ELM327 em si — não dependem da
@@ -94,15 +156,22 @@ const Duration kAtzTimeout = Duration(seconds: 3);
 /// ECU está desligada/não conectada).
 bool isElmFailureResponse(String raw) {
   final upper = raw.toUpperCase();
-  return upper.contains('NO DATA') ||
+  if (upper.contains('NO DATA') ||
       upper.contains('ERROR') ||
       upper.contains('UNABLE TO CONNECT') ||
       upper.contains('STOPPED') ||
       upper.contains('BUS BUSY') ||
       upper.contains('FB ERROR') ||
       upper.contains('DATA ERROR') ||
+      upper.contains('?') ||
       upper.contains('7F ') ||
-      upper.contains('?');
+      upper.contains('7F01') ||
+      upper.contains('7F21') ||
+      upper.contains('7F1A') ||
+      upper.contains('107F')) {
+    return true;
+  }
+  return false;
 }
 
 /// Resultado do parsing de uma resposta da ECU (KWP2000 ou ISO 9141) do ELM327.
@@ -115,14 +184,14 @@ class MarelliParseResult {
 /// Parseia a resposta do ELM327 para leituras do Fiat Palio:
 /// Suporta os 3 formatos retornados por adaptadores em veículos Fiat:
 /// 1. Resposta KWP2000 física Fiat (AlfaOBD):
-///    "8X F1 10 41/61 <PID> <DADOS...> <CS>\r\n>"
+///    "8X F1 10 41/61 <PID/LOCAL_ID> <DADOS...> <CS>\r\n>"
 ///    8X = Formato (0x80 + comprimento), F1 = Destino (Scanner), 10 = Origem (ECU Marelli)
 /// 2. Resposta legada ISO 9141 funcional:
 ///    "48 6B 10 41/61 <PID> <DADOS...> <CS>\r\n>"
 /// 3. Resposta direta do comando ATRV para tensão de bateria:
 ///    "12.6V\r\n>"
 /// 4. Resposta sem cabeçalho (se o adaptador omitir headers):
-///    "41/61 <PID> <DADOS...>\r\n>"
+///    "41/61 <PID/LOCAL_ID> <DADOS...>\r\n>"
 MarelliParseResult? parseMarelliResponse(String raw) {
   final cleaned = raw.replaceAll('>', '').trim();
   if (cleaned.isEmpty) return null;
@@ -160,10 +229,14 @@ MarelliParseResult? parseMarelliResponse(String raw) {
   if (bytes.isEmpty) return null;
 
   // 1. Resposta KWP2000 Fiat com cabeçalho ATH1 em qualquer posição dos bytes
-  // Procura padrão [FMT] [0xF1] [0x10] [41|61|5A] para ser imune a ecos ou lixo anterior
+  // Procura padrão [FMT] [0xF1] [0x10] [41|61|5A|7F] para ser imune a ecos ou lixo anterior
   for (var i = 1; i <= bytes.length - 4; i++) {
     if (bytes[i] == 0xF1 && bytes[i + 1] == 0x10) {
       final sResp = bytes[i + 2];
+      if (sResp == 0x7F) {
+        // Resposta negativa ISO 14230 (ex: 83 F1 10 7F 01 11 15)
+        return null;
+      }
       if (sResp == 0x41 || sResp == 0x61 || sResp == 0x5A) {
         final headerStart = i - 1;
         final checksum = bytes.last;
@@ -180,16 +253,16 @@ MarelliParseResult? parseMarelliResponse(String raw) {
             return MarelliParseResult([bytes[i + 3]]);
           }
         }
-        // Se clone do ELM327 omitiu o byte de checksum:
+        // Se clone do ELM327 omitiu ou divergiu no byte de checksum:
         final expectedPayloadLen = bytes[headerStart] & 0x3F;
-        if (expectedPayloadLen > 0 &&
-            (bytes.length - headerStart - 3) == expectedPayloadLen) {
-          final dataBytes = bytes.sublist(i + 4);
-          if (dataBytes.isNotEmpty) {
-            return MarelliParseResult(dataBytes);
-          }
-          if (i + 3 < bytes.length) {
-            return MarelliParseResult([bytes[i + 3]]);
+        if (expectedPayloadLen >= 2) {
+          final dataStart = i + 4; // pula FMT, F1, 10, SID, LOCAL_ID/PID
+          final dataEnd = headerStart + 3 + expectedPayloadLen;
+          if (dataStart <= dataEnd && dataEnd <= bytes.length) {
+            final dataBytes = bytes.sublist(dataStart, dataEnd);
+            if (dataBytes.isNotEmpty) {
+              return MarelliParseResult(dataBytes);
+            }
           }
         }
       }
@@ -199,6 +272,7 @@ MarelliParseResult? parseMarelliResponse(String raw) {
   // 2. Resposta legada ISO 9141 funcional (48 6B 10 ...)
   for (var i = 0; i <= bytes.length - 6; i++) {
     if (bytes[i] == 0x48 && bytes[i + 1] == 0x6B && bytes[i + 2] == 0x10) {
+      if (bytes[i + 3] == 0x7F) return null;
       final checksum = bytes.last;
       final computed = bytes
               .sublist(i, bytes.length - 1)
@@ -216,12 +290,13 @@ MarelliParseResult? parseMarelliResponse(String raw) {
   // 3. Resposta com cabeçalho de 3 bytes para ECU Marelli (xx xx 10 41/5A/61...), mas header desconhecido ou checksum inválido
   if (bytes.length >= 5 &&
       bytes[2] == 0x10 &&
-      (bytes[3] == 0x41 || bytes[3] == 0x61 || bytes[3] == 0x5A)) {
+      (bytes[3] == 0x41 || bytes[3] == 0x61 || bytes[3] == 0x5A || bytes[3] == 0x7F)) {
     return null;
   }
 
   // 4. Resposta padrão OBD2 sem cabeçalhos (41 <PID> <DADOS...> ou 61 <ID> <DADOS...> ou 5A <ID> <DADOS...>)
   for (var i = 0; i <= bytes.length - 2; i++) {
+    if (bytes[i] == 0x7F) return null;
     if (bytes[i] == 0x41 || bytes[i] == 0x61 || bytes[i] == 0x5A) {
       final dataBytes = bytes.sublist(i + 2);
       if (dataBytes.isNotEmpty) {

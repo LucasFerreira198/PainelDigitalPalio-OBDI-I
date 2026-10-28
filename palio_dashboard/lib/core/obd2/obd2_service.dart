@@ -126,7 +126,7 @@ class Obd2Service {
       _logSink?.call(LogLevel.warn, 'obd2', 'Tentativa 1A 97: $e');
     }
 
-    // 2. Teste direto de RPM (01 0C)
+    // 2. Teste direto de RPM Marelli (21 30)
     if (await _readPid(MarelliPid.rpm, timeout: const Duration(seconds: 2))) {
       await _readPid(MarelliPid.batteryVoltage);
       _last = _last.copyWith(
@@ -137,7 +137,7 @@ class Obd2Service {
       return true;
     }
 
-    // 3. Fallback: temperatura do motor (01 05)
+    // 3. Fallback: temperatura do motor (21 33)
     if (await _readPid(MarelliPid.coolantTemp, timeout: const Duration(seconds: 2))) {
       await _readPid(MarelliPid.batteryVoltage);
       _last = _last.copyWith(
@@ -457,11 +457,11 @@ class Obd2Service {
       );
       final parsed = parseMarelliResponse(raw);
       if (parsed == null) {
-        // Fallback especial para RPM: se 01 0C não retornar dados, tenta Service 21 Marelli (21 01)
+        // Fallback especial para RPM: se 21 30 não responder, tenta modo padrão OBD2 01 0C
         if (pid == MarelliPid.rpm) {
           try {
             final locRaw = await btManager.sendCommand(
-              '21 01',
+              '01 0C',
               timeout: const Duration(milliseconds: 1500),
             );
             final locParsed = parseMarelliResponse(locRaw);
