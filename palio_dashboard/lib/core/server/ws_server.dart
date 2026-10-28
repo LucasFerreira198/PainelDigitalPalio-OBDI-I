@@ -10,28 +10,89 @@ class WsServer {
   HttpServer? _server;
   final Set<WebSocket> _clients = {};
 
+  /// Limite máximo de clientes simultâneos para evitar exaustão de memória/soquetes.
+  static const int maxClients = 5;
+
   bool get isRunning => _server != null;
   int? get port => _server?.port;
+  int get clientCount => _clients.length;
 
   Future<void> start({int port = 8765}) async {
     if (_server != null) return;
     _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    _server!.transform(WebSocketTransformer()).listen((ws) {
-      _clients.add(ws);
-      ws.done.then((_) => _clients.remove(ws));
+    _server!.listen((HttpRequest request) async {
+      // Rejeita requisições HTTP que não sejam WebSocket upgrade
+      if (!WebSocketTransformer.isUpgradeRequest(request)) {
+        request.response.statusCode = HttpStatus.badRequest;
+        await request.response.close();
+        return;
+      }
+
+      // Limita conexões simultâneas para mitigar negação de serviço (DoS)
+      if (_clients.length >= maxClients) {
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+        request.response.write('Max connections reached');
+        await request.response.close();
+        return;
+      }
+
+      // Valida IP de origem: aceita apenas rede local privada (LAN) ou loopback
+      final remoteAddr = request.connectionInfo?.remoteAddress;
+      if (remoteAddr != null && !_isAllowedClient(remoteAddr)) {
+        request.response.statusCode = HttpStatus.forbidden;
+        request.response.write('Forbidden: only local network allowed');
+        await request.response.close();
+        return;
+      }
+
+      try {
+        final ws = await WebSocketTransformer.upgrade(request);
+        _clients.add(ws);
+        ws.listen(
+          (_) {},
+          onError: (_) {
+            _clients.remove(ws);
+            try {
+              ws.close();
+            } catch (_) {}
+          },
+          onDone: () {
+            _clients.remove(ws);
+          },
+          cancelOnError: true,
+        );
+      } catch (_) {
+        // Handshake falhou ou cliente desconectou abruptamente
+      }
     });
   }
 
+  static bool _isAllowedClient(InternetAddress addr) {
+    if (addr.isLoopback) return true;
+    return _isPrivateLanAddress(addr.address);
+  }
+
   void broadcast(OBDDataModel data) {
+    if (_clients.isEmpty) return;
     final json = jsonEncode(data.toJson());
-    for (final ws in _clients) {
-      ws.add(json);
+    for (final ws in _clients.toList()) {
+      try {
+        if (ws.readyState == WebSocket.open) {
+          ws.add(json);
+        } else {
+          _clients.remove(ws);
+        }
+      } catch (_) {
+        _clients.remove(ws);
+      }
     }
   }
 
   Future<void> stop() async {
     for (final ws in _clients.toList()) {
-      await ws.close();
+      try {
+        await ws.close();
+      } catch (_) {}
     }
     _clients.clear();
     await _server?.close(force: true);

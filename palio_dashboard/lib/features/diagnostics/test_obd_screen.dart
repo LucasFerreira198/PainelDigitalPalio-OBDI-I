@@ -159,17 +159,23 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
     super.dispose();
   }
 
+  void _safeSetState(VoidCallback fn) {
+    if (mounted) {
+      setState(fn);
+    }
+  }
+
   Future<void> _executeStep(_TestCase test) async {
     final btManager = ref.read(btManagerProvider);
     if (!btManager.isConnected) {
-      setState(() {
+      _safeSetState(() {
         test.status = TestStatus.failure;
         test.errorMessage = 'Bluetooth não conectado. Conecte nas Configurações.';
       });
       return;
     }
 
-    setState(() {
+    _safeSetState(() {
       test.status = TestStatus.running;
       test.errorMessage = null;
       test.rawResponse = null;
@@ -181,7 +187,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
         case 'atz':
           final raw = await btManager.sendCommand('ATZ', timeout: const Duration(seconds: 3));
           final clean = raw.replaceAll('>', '').trim();
-          setState(() {
+          _safeSetState(() {
             test.rawResponse = clean;
             test.status = TestStatus.success;
             test.resultValue = 'Chip: $clean';
@@ -193,7 +199,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
             final t = cmd == 'ATZ' ? const Duration(seconds: 3) : BtManager.defaultTimeout;
             await btManager.sendCommand(cmd, timeout: t);
           }
-          setState(() {
+          _safeSetState(() {
             test.rawResponse = 'ATSP5, ATIB10, ATH1, ATSH8210F1 OK';
             test.status = TestStatus.success;
             test.resultValue = 'Configurado para Palio Fire (KWP2000 Fast Init)';
@@ -205,13 +211,13 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final v = MarelliFormulas.voltage(parsed.dataBytes);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${v.toStringAsFixed(1)} V';
             });
           } else {
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw;
               test.status = TestStatus.failure;
               test.errorMessage = 'Não foi possível ler a tensão do adaptador ($raw)';
@@ -223,13 +229,13 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final raw = await btManager.sendCommand('1A 97', timeout: const Duration(milliseconds: 3800));
           final clean = raw.replaceAll('>', '').trim();
           if (!isElmFailureResponse(raw) && (clean.contains('5A') || clean.contains('97'))) {
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = clean;
               test.status = TestStatus.success;
               test.resultValue = 'ECU Acordada! Resposta positiva: $clean';
             });
           } else {
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = clean;
               test.status = TestStatus.failure;
               test.errorMessage = isElmFailureResponse(raw)
@@ -244,7 +250,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.length >= 2) {
             final rpm = MarelliFormulas.rpm(parsed.dataBytes);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${rpm.toStringAsFixed(0)} RPM (Marelli 21 30)';
@@ -259,7 +265,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               final stdParsed = parseMarelliResponse(stdRaw);
               if (stdParsed != null && stdParsed.dataBytes.length >= 2) {
                 final stdRpm = MarelliFormulas.rpm(stdParsed.dataBytes);
-                setState(() {
+                _safeSetState(() {
                   test.rawResponse =
                       '21 30: ${raw.replaceAll('>', '').trim()} | 01 0C: ${stdRaw.replaceAll('>', '').trim()}';
                   test.status = TestStatus.success;
@@ -270,7 +276,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               }
             } catch (_) {}
 
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage =
@@ -284,7 +290,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final t = MarelliFormulas.temp(parsed.dataBytes);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${t.toStringAsFixed(0)} °C (Marelli 21 33)';
@@ -296,7 +302,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               final stdParsed = parseMarelliResponse(stdRaw);
               if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
                 final t = MarelliFormulas.temp(stdParsed.dataBytes);
-                setState(() {
+                _safeSetState(() {
                   test.rawResponse = '21 33: ${raw.replaceAll('>', '').trim()} | 01 05: ${stdRaw.replaceAll('>', '').trim()}';
                   test.status = TestStatus.success;
                   test.resultValue = '${t.toStringAsFixed(0)} °C (Modo 01 05)';
@@ -305,7 +311,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               }
             } catch (_) {}
 
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage = 'Sem leitura de temperatura ($raw)';
@@ -319,13 +325,13 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final f = MarelliFormulas.fuelLevel(parsed.dataBytes);
             final liters = (f * 48.0 / 100.0);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${f.toStringAsFixed(1)}% (~${liters.toStringAsFixed(1)}L)';
             });
           } else {
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage = 'Nível de combustível não disponível via ECU de injeção (no Palio 2010 a boia é ligada ao painel de instrumentos IPC)';
@@ -338,7 +344,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final mapVal = MarelliFormulas.map(parsed.dataBytes);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${mapVal.toStringAsFixed(0)} kPa (Marelli 21 31)';
@@ -350,7 +356,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               final stdParsed = parseMarelliResponse(stdRaw);
               if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
                 final mapVal = MarelliFormulas.map(stdParsed.dataBytes);
-                setState(() {
+                _safeSetState(() {
                   test.rawResponse = '21 31: ${raw.replaceAll('>', '').trim()} | 01 0B: ${stdRaw.replaceAll('>', '').trim()}';
                   test.status = TestStatus.success;
                   test.resultValue = '${mapVal.toStringAsFixed(0)} kPa (Modo 01 0B)';
@@ -359,7 +365,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               }
             } catch (_) {}
 
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage = 'Sem leitura de MAP ($raw)';
@@ -372,7 +378,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final tpsVal = MarelliFormulas.tps(parsed.dataBytes);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${tpsVal.toStringAsFixed(1)}% (Marelli 21 34)';
@@ -384,7 +390,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               final stdParsed = parseMarelliResponse(stdRaw);
               if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
                 final tpsVal = MarelliFormulas.tps(stdParsed.dataBytes);
-                setState(() {
+                _safeSetState(() {
                   test.rawResponse = '21 34: ${raw.replaceAll('>', '').trim()} | 01 11: ${stdRaw.replaceAll('>', '').trim()}';
                   test.status = TestStatus.success;
                   test.resultValue = '${tpsVal.toStringAsFixed(1)}% (Modo 01 11)';
@@ -393,7 +399,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               }
             } catch (_) {}
 
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage = 'Sem leitura de TPS ($raw)';
@@ -406,7 +412,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           final parsed = parseMarelliResponse(raw);
           if (parsed != null && parsed.dataBytes.isNotEmpty) {
             final spd = MarelliFormulas.speed(parsed.dataBytes);
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.success;
               test.resultValue = '${spd.toStringAsFixed(0)} km/h (Marelli 21 53)';
@@ -418,7 +424,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               final stdParsed = parseMarelliResponse(stdRaw);
               if (stdParsed != null && stdParsed.dataBytes.isNotEmpty) {
                 final spd = MarelliFormulas.speed(stdParsed.dataBytes);
-                setState(() {
+                _safeSetState(() {
                   test.rawResponse = '21 53: ${raw.replaceAll('>', '').trim()} | 01 0D: ${stdRaw.replaceAll('>', '').trim()}';
                   test.status = TestStatus.success;
                   test.resultValue = '${spd.toStringAsFixed(0)} km/h (Modo 01 0D)';
@@ -427,7 +433,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
               }
             } catch (_) {}
 
-            setState(() {
+            _safeSetState(() {
               test.rawResponse = raw.replaceAll('>', '').trim();
               test.status = TestStatus.failure;
               test.errorMessage = 'Sem leitura de velocidade via 21 53 nem 01 0D ($raw)';
@@ -436,7 +442,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           break;
       }
     } catch (e) {
-      setState(() {
+      _safeSetState(() {
         test.status = TestStatus.failure;
         test.errorMessage = e.toString();
       });
@@ -444,14 +450,17 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
   }
 
   Future<void> _runFullSuite() async {
+    if (_isAutoSuiteRunning) return;
     final btManager = ref.read(btManagerProvider);
     if (!btManager.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Conecte o Bluetooth nas Configurações antes de iniciar o teste.'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conecte o Bluetooth nas Configurações antes de iniciar o teste.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
@@ -466,12 +475,16 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
 
     int successes = 0;
     for (final test in _testCases) {
+      if (!mounted) return;
       await _executeStep(test);
+      if (!mounted) return;
       if (test.status == TestStatus.success) {
         successes++;
       }
       await Future.delayed(const Duration(milliseconds: 200));
     }
+
+    if (!mounted) return;
 
     final batteryTest = _testCases.firstWhere((t) => t.id == 'atrv');
     final wakeupTest = _testCases.firstWhere((t) => t.id == 'wakeup');
@@ -491,27 +504,53 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
           'Verifique se o ELM327 está bem encaixado na tomada OBD2 do Palio.';
     }
 
-    setState(() {
-      _isAutoSuiteRunning = false;
-      _autoSuiteSummary = summary;
-    });
+    if (mounted) {
+      setState(() {
+        _isAutoSuiteRunning = false;
+        _autoSuiteSummary = summary;
+      });
+    }
 
     // Retoma o loop normal
     obdService?.startLoop();
   }
 
   Future<void> _sendManualCommand() async {
-    final cmd = _cmdController.text.trim();
+    final rawInput = _cmdController.text.trim();
+    if (rawInput.isEmpty) return;
+
+    // Sanitiza: permite apenas letras, dígitos e espaços (comandos AT e hexadecimais OBD2)
+    final cmd = rawInput.replaceAll(RegExp(r'[^a-zA-Z0-9 ]'), '').trim();
     if (cmd.isEmpty) return;
+
+    // Bloqueia comandos perigosos de escrita direta em memória ou reset acidental de ECU
+    final upper = cmd.toUpperCase().replaceAll(' ', '');
+    final isDangerous = upper.startsWith('3D') || // WriteMemoryByAddress
+        upper.startsWith('2E') || // WriteDataByIdentifier
+        upper.startsWith('1101') || // Hard ECU Reset
+        upper.startsWith('1103'); // Soft ECU Reset
+    if (isDangerous) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Comando de escrita/reset bloqueado por segurança do veículo.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
 
     final btManager = ref.read(btManagerProvider);
     if (!btManager.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bluetooth não conectado.'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bluetooth não conectado.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
@@ -542,18 +581,20 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
     }).join('\n');
 
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Log do terminal copiado para a área de transferência!'),
-        backgroundColor: Colors.green,
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Log do terminal copiado para a área de transferência!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   void _clearTerminal() {
     final btManager = ref.read(btManagerProvider);
     btManager.clearTrafficLogs();
-    setState(() {
+    _safeSetState(() {
       _trafficLogs.clear();
     });
   }
@@ -561,12 +602,14 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
   Future<void> _switchProtocol(EcuProtocol proto) async {
     final btManager = ref.read(btManagerProvider);
     if (!btManager.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bluetooth não conectado. Conecte nas Configurações.'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bluetooth não conectado. Conecte nas Configurações.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
@@ -574,7 +617,7 @@ class _TestObdScreenState extends ConsumerState<TestObdScreen> {
     if (obdService != null) {
       final ok = await obdService.switchProtocolLive(proto);
       if (mounted) {
-        setState(() {
+        _safeSetState(() {
           _selectedProtocol = proto;
         });
         ref.read(manualEcuProtocolProvider.notifier).state = proto;

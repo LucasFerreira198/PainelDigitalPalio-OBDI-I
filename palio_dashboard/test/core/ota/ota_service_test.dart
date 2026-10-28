@@ -31,4 +31,30 @@ void main() {
       expect(isNewerVersion(latest: '1.3.0', current: '1.2.9'), isTrue);
     });
   });
+
+  group('OtaService security validation', () {
+    test('rejeita download com URL não-HTTPS', () async {
+      final ota = OtaService();
+      expect(
+        () => ota.downloadApk('http://github.com/LucasFerreira198/app/update.apk'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('rejeita download de domínio não-autorizado', () async {
+      final ota = OtaService();
+      expect(
+        () => ota.downloadApk('https://malicious-site.com/update.apk'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('rejeita download de arquivo sem extensão .apk', () async {
+      final ota = OtaService();
+      expect(
+        () => ota.downloadApk('https://github.com/LucasFerreira198/app/update.exe'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
 }

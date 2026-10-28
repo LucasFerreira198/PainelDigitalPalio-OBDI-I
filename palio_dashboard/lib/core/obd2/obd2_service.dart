@@ -375,13 +375,12 @@ class Obd2Service {
     }
   }
 
-  /// Inicia o loop contínuo de leitura dos PIDs da camada de protocolo
-  /// ativa ([activeProtocol]). Cada ciclo lê os PIDs em sequência e emite
-  /// um snapshot consolidado de [OBDDataModel].
-  /// Lê a tensão da bateria [ATRV] continuamente para garantir que o painel
-  /// mostre a voltagem da bateria mesmo com o motor desligado.
+  /// Inicia o loop contínuo de telemetria otimizado para o Palio Fire.
+  /// Para máxima responsividade dos mostradores analógicos/digitais, o RPM é
+  /// consultado a cada ciclo (~50ms) com prioridade máxima, enquanto os demais
+  /// sensores de menor variação dinâmica (temperatura, bateria, MAP) são escalonados.
   Future<void> startLoop({
-    Duration cycleDelay = const Duration(milliseconds: 50),
+    Duration cycleDelay = const Duration(milliseconds: 30),
   }) async {
     if (_running) return;
     _running = true;
@@ -389,16 +388,16 @@ class Obd2Service {
     while (_running) {
       loopCounter++;
 
-      // Sempre lê a bateria a cada ~1.5s (ou a cada 2 ciclos se a ECU estiver desligada)
-      final shouldReadBattery = !_last.ecuResponding || (loopCounter % 8 == 0);
+      // Sempre lê a bateria a cada ~2s (ou a cada 2 ciclos se a ECU estiver desligada)
+      final shouldReadBattery = !_last.ecuResponding || (loopCounter % 15 == 0);
       if (shouldReadBattery) {
-        await _readPid(MarelliPid.batteryVoltage);
+        await _readPid(MarelliPid.batteryVoltage, timeout: const Duration(milliseconds: 500));
       }
 
-      // Se a ECU não está respondendo, tenta o despertar AlfaOBD (1A 97) a cada 8 ciclos
-      if (!_last.ecuResponding && (loopCounter % 8 == 0)) {
+      // Se a ECU não está respondendo, tenta o despertar AlfaOBD (1A 97) a cada 10 ciclos
+      if (!_last.ecuResponding && (loopCounter % 10 == 0)) {
         try {
-          final idRaw = await btManager.sendCommand('1A 97', timeout: const Duration(seconds: 2));
+          final idRaw = await btManager.sendCommand('1A 97', timeout: const Duration(milliseconds: 1500));
           if (!isElmFailureResponse(idRaw) && (idRaw.contains('5A') || idRaw.contains('97'))) {
             _last = _last.copyWith(ecuResponding: true);
             _dataController.add(_last);
@@ -408,10 +407,10 @@ class Obd2Service {
 
       final anyPidSucceeded = _activeLayer == EcuProtocol.obd2Standard
           ? await _runStandardCycle(StandardObd2Pid.dashboardLoop)
-          : await _runMarelliCycle(MarelliPid.dashboardLoop);
+          : await _runMarelliAdaptiveCycle(loopCounter);
 
       _last = _last.copyWith(
-        ecuResponding: anyPidSucceeded,
+        ecuResponding: anyPidSucceeded || _last.ecuResponding,
         ecuProtocolLabel: 'IAW 4AF EOBD (KWP2000)',
       );
       _dataController.add(_last);
@@ -424,13 +423,43 @@ class Obd2Service {
     btManager.clearQueue();
   }
 
-  /// Lê todos os [pids] Marelli uma vez; retorna true se algum sensor da ECU respondeu.
-  /// NÃO considera [batteryVoltage] como resposta da ECU, pois ATRV responde
-  /// do próprio ELM327 com motor/ECU desligada.
+  /// Ciclo adaptativo de alta performance: RPM é prioridade absoluta (lido a cada ciclo),
+  /// enquanto velocidade, MAP e temperatura são intercalados para evitar atrasos na K-line.
+  Future<bool> _runMarelliAdaptiveCycle(int loopCounter) async {
+    var anyEcuPidSucceeded = false;
+    const fastTimeout = Duration(milliseconds: 400);
+
+    // 1. RPM (Prioridade máxima: lido em absolutamente todos os ciclos)
+    final rpmOk = await _readPid(MarelliPid.rpm, timeout: fastTimeout);
+    if (rpmOk) anyEcuPidSucceeded = true;
+
+    // 2. Velocidade e MAP a cada 2 ciclos
+    if (loopCounter % 2 == 0) {
+      final spdOk = await _readPid(MarelliPid.speed, timeout: fastTimeout);
+      if (spdOk) anyEcuPidSucceeded = true;
+
+      final mapOk = await _readPid(MarelliPid.map, timeout: fastTimeout);
+      if (mapOk) anyEcuPidSucceeded = true;
+    }
+
+    // 3. Temperatura do motor e TPS a cada 4 ciclos (temperatura varia lentamente)
+    if (loopCounter % 4 == 0) {
+      final tempOk = await _readPid(MarelliPid.coolantTemp, timeout: fastTimeout);
+      if (tempOk) anyEcuPidSucceeded = true;
+
+      final tpsOk = await _readPid(MarelliPid.tps, timeout: fastTimeout);
+      if (tpsOk) anyEcuPidSucceeded = true;
+    }
+
+    return anyEcuPidSucceeded;
+  }
+
+  /// Lê todos os [pids] Marelli sequencialmente (usado em handshakes/diagnósticos).
   Future<bool> _runMarelliCycle(List<MarelliPid> pids) async {
     var anyEcuPidSucceeded = false;
+    const timeout = Duration(milliseconds: 500);
     for (final pid in pids) {
-      final ok = await _readPid(pid);
+      final ok = await _readPid(pid, timeout: timeout);
       if (ok && pid != MarelliPid.batteryVoltage) {
         anyEcuPidSucceeded = true;
       }

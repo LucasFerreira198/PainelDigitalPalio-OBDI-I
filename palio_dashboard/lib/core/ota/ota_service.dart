@@ -62,10 +62,30 @@ class OtaService {
 
   /// Baixa o APK em [getTemporaryDirectory]/update.apk, reportando progresso
   /// de 0.0 a 1.0 via [onProgress].
+  /// Valida estritamente a URL de download para mitigar ataques de spoofing/MITM.
   Future<String> downloadApk(
     String url, {
     void Function(double progress)? onProgress,
   }) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') {
+      throw ArgumentError('URL de atualização inválida: deve usar protocolo HTTPS.');
+    }
+
+    final host = uri.host.toLowerCase();
+    final isAllowedHost = host == 'github.com' ||
+        host.endsWith('.github.com') ||
+        host == 'objects.githubusercontent.com' ||
+        host.endsWith('.githubusercontent.com');
+
+    if (!isAllowedHost) {
+      throw ArgumentError('URL de atualização não autorizada: origem fora do GitHub ($host).');
+    }
+
+    if (!uri.path.toLowerCase().endsWith('.apk')) {
+      throw ArgumentError('Arquivo de atualização inválido: deve possuir extensão .apk.');
+    }
+
     final dir = await getTemporaryDirectory();
     final savePath = '${dir.path}/update.apk';
 

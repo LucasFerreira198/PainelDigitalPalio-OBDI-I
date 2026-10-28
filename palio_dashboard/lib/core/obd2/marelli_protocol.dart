@@ -5,10 +5,11 @@ class MarelliFormulas {
   MarelliFormulas._();
 
   /// Rotação do motor (RPM): Service 21 Local ID 0x30.
-  /// Payload de 16-bit com slope 0.25 (ou / 4.0): RPM = ((MSB * 256) + LSB) * 0.25.
+  /// No protocolo KWP2000 Marelli IAW 4AF, o payload de 16-bit já entrega o valor
+  /// real diretamente em RPM (slope 1.0, 1 RPM por bit).
   static double rpm(List<int> bytes) {
     if (bytes.length >= 2) {
-      return ((bytes[0] * 256 + bytes[1]) / 4).toDouble();
+      return (bytes[0] * 256 + bytes[1]).toDouble();
     }
     return 0.0;
   }
@@ -16,6 +17,9 @@ class MarelliFormulas {
   /// Velocidade do veículo (km/h): Service 21 Local ID 0x53.
   /// Payload de 8-bit com slope 1.0 (ou byte único).
   static double speed(List<int> bytes) {
+    if (bytes.length >= 2 && bytes[0] == 0) {
+      return bytes[1].toDouble();
+    }
     if (bytes.isNotEmpty) {
       return bytes[0].toDouble();
     }
@@ -23,10 +27,28 @@ class MarelliFormulas {
   }
 
   /// Temperatura do líquido de arrefecimento (°C): Service 21 Local ID 0x33.
-  /// Payload de 8-bit com offset -40: Temp = byte[0] - 40.
+  /// Trata payloads de 16-bit (MSB=0 com dado em LSB) e 8-bit com offset -40.
   static double temp(List<int> bytes) {
+    if (bytes.length >= 2) {
+      // Se bytes[0] for 0, o byte significativo de temperatura é bytes[1]
+      if (bytes[0] == 0) {
+        final val = bytes[1];
+        return val >= 40 ? (val - 40).toDouble() : val.toDouble();
+      }
+      final raw16 = bytes[0] * 256 + bytes[1];
+      // Se formato KWP 16-bit com escala 1/32°C (comum em ECUs Marelli)
+      if (raw16 > 500) {
+        final t32 = (raw16 / 32.0) - 40.0;
+        if (t32 >= -40 && t32 <= 150) return t32;
+      }
+      // Se formato com escala 0.1°C
+      final t10 = (raw16 * 0.1) - 40.0;
+      if (t10 >= -40 && t10 <= 150) return t10;
+      return (bytes[1] - 40).toDouble();
+    }
     if (bytes.isNotEmpty) {
-      return (bytes[0] - 40).toDouble();
+      final val = bytes[0];
+      return val >= 40 ? (val - 40).toDouble() : val.toDouble();
     }
     return 0.0;
   }

@@ -34,9 +34,9 @@ class CloudRelayService {
   OBDDataModel? _latest;
   String? _publishingCode;
 
-  /// Gera um PIN curto (6 dígitos) para identificar a sessão.
+  /// Gera um PIN criptograficamente seguro (6 dígitos) para identificar a sessão.
   static String generateCode() {
-    final random = Random();
+    final random = Random.secure();
     return List.generate(6, (_) => random.nextInt(10)).join();
   }
 

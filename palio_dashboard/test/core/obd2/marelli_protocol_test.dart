@@ -5,22 +5,32 @@ import 'package:palio_dashboard/core/obd2/pid_definitions.dart';
 void main() {
   group('parseMarelliResponse', () {
     test('parseia resposta KWP2000 Fiat Marelli Service 21 RPM (21 30) - Caso Real AlfaOBD 866 RPM', () {
-      // 84 F1 10 61 30 0D 88 (dados 0D 88 = 3464 -> 3464 * 0.25 = 866.0 RPM)
-      // Checksum: (0x84 + 0xF1 + 0x10 + 0x61 + 0x30 + 0x0D + 0x88) & 0xFF = 0xAB
-      final result = parseMarelliResponse('84 F1 10 61 30 0D 88 AB\r\n>');
+      // 84 F1 10 61 30 03 62 (dados 03 62 = 866 -> 866.0 RPM direto no protocolo KWP Marelli IAW 4AF)
+      // Checksum: (0x84 + 0xF1 + 0x10 + 0x61 + 0x30 + 0x03 + 0x62) & 0xFF = 0x85
+      final result = parseMarelliResponse('84 F1 10 61 30 03 62 85\r\n>');
 
       expect(result, isNotNull);
-      expect(result!.dataBytes, [0x0D, 0x88]);
+      expect(result!.dataBytes, [0x03, 0x62]);
       expect(MarelliFormulas.rpm(result.dataBytes), 866.0);
     });
 
-    test('parseia resposta KWP2000 Fiat Marelli Service 21 Temperatura (21 33) 85 °C', () {
+    test('parseia resposta KWP2000 Fiat Marelli Service 21 Temperatura (21 33) 85 °C (1 byte)', () {
       // 83 F1 10 61 33 7D (dados 0x7D = 125 -> 125 - 40 = 85 °C)
       // Checksum: (0x83 + 0xF1 + 0x10 + 0x61 + 0x33 + 0x7D) & 0xFF = 0x95
       final result = parseMarelliResponse('83 F1 10 61 33 7D 95\r\n>');
 
       expect(result, isNotNull);
       expect(result!.dataBytes, [0x7D]);
+      expect(MarelliFormulas.temp(result.dataBytes), 85.0);
+    });
+
+    test('parseia resposta KWP2000 Fiat Marelli Service 21 Temperatura (21 33) 85 °C (2 bytes com MSB=0)', () {
+      // 84 F1 10 61 33 00 7D (dados 00 7D -> 125 - 40 = 85 °C, previne o bug de -40°C)
+      // Checksum: (0x84 + 0xF1 + 0x10 + 0x61 + 0x33 + 0x00 + 0x7D) & 0xFF = 0x96
+      final result = parseMarelliResponse('84 F1 10 61 33 00 7D 96\r\n>');
+
+      expect(result, isNotNull);
+      expect(result!.dataBytes, [0x00, 0x7D]);
       expect(MarelliFormulas.temp(result.dataBytes), 85.0);
     });
 
@@ -61,12 +71,12 @@ void main() {
     });
 
     test('parseia resposta KWP2000 Fiat com header 84 F1 10 41 0C (Modo 01 fallback)', () {
-      // 84 F1 10 41 0C 1F 40 (dados 1F 40 = 2000 RPM)
-      // Checksum: (0x84 + 0xF1 + 0x10 + 0x41 + 0x0C + 0x1F + 0x40) & 0xFF = 0x31
-      final result = parseMarelliResponse('84 F1 10 41 0C 1F 40 31\r\n>');
+      // 84 F1 10 41 0C 07 D0 (dados 07 D0 = 2000 RPM)
+      // Checksum: (0x84 + 0xF1 + 0x10 + 0x41 + 0x0C + 0x07 + 0xD0) & 0xFF = 0x49
+      final result = parseMarelliResponse('84 F1 10 41 0C 07 D0 49\r\n>');
 
       expect(result, isNotNull);
-      expect(result!.dataBytes, [0x1F, 0x40]);
+      expect(result!.dataBytes, [0x07, 0xD0]);
       expect(MarelliFormulas.rpm(result.dataBytes), 2000.0);
     });
 
@@ -77,12 +87,12 @@ void main() {
       expect(MarelliFormulas.voltage(result!.dataBytes), closeTo(12.6, 0.1));
     });
 
-    test('parseia resposta sem headers (ATH0) 61 30 0D 88', () {
-      final result = parseMarelliResponse('61 30 0D 88\r\n>');
+    test('parseia resposta sem headers (ATH0) 61 30 03 6C', () {
+      final result = parseMarelliResponse('61 30 03 6C\r\n>');
 
       expect(result, isNotNull);
-      expect(result!.dataBytes, [0x0D, 0x88]);
-      expect(MarelliFormulas.rpm(result.dataBytes), 866.0);
+      expect(result!.dataBytes, [0x03, 0x6C]);
+      expect(MarelliFormulas.rpm(result.dataBytes), 876.0);
     });
 
     test('parseia resposta de despertar KWP2000 Marelli 1A 97 (5A 97 com header)', () {
@@ -113,18 +123,28 @@ void main() {
   });
 
   group('MarelliFormulas', () {
-    test('rpm converte 16-bit com slope 0.25 (divisão por 4)', () {
-      expect(MarelliFormulas.rpm([0x0D, 0x88]), 866.0);
-      expect(MarelliFormulas.rpm([0x1F, 0x40]), 2000.0);
+    test('rpm converte 16-bit com slope 1.0 direto do KWP2000 Marelli (Casos reais Palio Fire)', () {
+      // Marcha lenta real do Palio Fire (foto 9915): 876 RPM (antes mostrava erroneamente 219)
+      expect(MarelliFormulas.rpm([0x03, 0x6C]), 876.0);
+      // Aceleração real do Palio Fire (foto 9909): 1076 RPM (antes mostrava erroneamente 269)
+      expect(MarelliFormulas.rpm([0x04, 0x34]), 1076.0);
+      // Rotação alta: 2500 RPM
+      expect(MarelliFormulas.rpm([0x09, 0xC4]), 2500.0);
     });
 
-    test('temp converte byte único com offset -40', () {
+    test('temp converte byte único com offset -40 e payload de 16-bit com MSB=0', () {
       expect(MarelliFormulas.temp([90]), 50.0);
       expect(MarelliFormulas.temp([125]), 85.0);
+      // Caso 2-byte MSB=0 (evita -40°C quando ECU responde com 2 bytes)
+      expect(MarelliFormulas.temp([0x00, 125]), 85.0);
+      expect(MarelliFormulas.temp([0x00, 90]), 50.0);
+      // Caso 16-bit com escala 1/32°C (4000/32 - 40 = 85°C)
+      expect(MarelliFormulas.temp([0x0F, 0xA0]), 85.0);
     });
 
-    test('speed retorna valor em km/h', () {
+    test('speed retorna valor em km/h tanto para 1 byte quanto para 2 bytes com MSB=0', () {
       expect(MarelliFormulas.speed([45]), 45.0);
+      expect(MarelliFormulas.speed([0x00, 45]), 45.0);
     });
 
     test('map converte mbar para kPa quando > 255', () {
