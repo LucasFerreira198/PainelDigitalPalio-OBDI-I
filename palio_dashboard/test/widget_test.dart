@@ -8,6 +8,7 @@ import 'package:palio_dashboard/features/dashboard/dashboard_provider.dart';
 import 'package:palio_dashboard/features/dtc/dtc_provider.dart';
 import 'package:palio_dashboard/features/dtc/dtc_screen.dart';
 import 'package:palio_dashboard/features/pc_viewer/pc_dashboard_screen.dart';
+import 'package:palio_dashboard/features/pc_viewer/pc_viewer_provider.dart';
 import 'package:palio_dashboard/features/settings/settings_provider.dart';
 import 'package:palio_dashboard/features/settings/settings_screen.dart';
 import 'package:palio_dashboard/main.dart';
@@ -148,13 +149,18 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const ProviderScope(
-        child: MaterialApp(
+      ProviderScope(
+        overrides: [
+          pcObdDataProvider.overrideWith(
+            (ref) => Stream.value(OBDDataModel.empty()),
+          ),
+        ],
+        child: const MaterialApp(
           home: PcDashboardScreen(),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('PalioDash — PC Viewer'), findsOneWidget);
   });
